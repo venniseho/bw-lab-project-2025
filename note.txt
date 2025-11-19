@@ -1,0 +1,8 @@
+python coco_pipeline_revised.py \
+  --coco_ann COCO/annotations/instances_val2014.json \
+  --coco_imgdir COCO/val2014 \
+  --out_root . \
+  --limit 3 \
+  --save_instances \
+  --sam_ckpt checkpoints/sam_vit_h_4b8939.pth \
+  --sam_model_type vit_h
