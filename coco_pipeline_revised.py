@@ -219,38 +219,38 @@ def main():
         print(f"Instance outlines -> {out_inst_outlines}")
         
     # --- write SAM IoU CSV + scatter plot ---
-if len(sam_rows) > 0:
-    metrics_dir = out_root / "output" / "metrics"
-    metrics_dir.mkdir(parents=True, exist_ok=True)
+    if len(sam_rows) > 0:
+        metrics_dir = out_root / "output" / "metrics"
+        metrics_dir.mkdir(parents=True, exist_ok=True)
 
-    csv_path = metrics_dir / "sam_iou.csv"
-    with open(csv_path, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["stem", "iou_orig", "iou_frag"])
-        w.writeheader()
-        w.writerows(sam_rows)
+        csv_path = metrics_dir / "sam_iou.csv"
+        with open(csv_path, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=["stem", "iou_orig", "iou_frag"])
+            w.writeheader()
+            w.writerows(sam_rows)
 
-    # scatter: clean (x) vs fragmented (y)
-    xs = [r["iou_orig"] for r in sam_rows]
-    ys = [r["iou_frag"] for r in sam_rows]
+        # scatter: clean (x) vs fragmented (y)
+        xs = [r["iou_orig"] for r in sam_rows]
+        ys = [r["iou_frag"] for r in sam_rows]
 
-    plt.figure()
-    plt.scatter(xs, ys)
-    plt.xlabel("IoU (clean/original)")
-    plt.ylabel("IoU (fragmented)")
-    plt.title("SAM IoU: clean vs fragmented")
-    plt.xlim(0, 1)
-    plt.ylim(0, 1)
-    plt.grid(True, linewidth=0.5)
-    plt.tight_layout()
+        plt.figure()
+        plt.scatter(xs, ys)
+        plt.xlabel("IoU (clean/original)")
+        plt.ylabel("IoU (fragmented)")
+        plt.title("SAM IoU: clean vs fragmented")
+        plt.xlim(0, 1)
+        plt.ylim(0, 1)
+        plt.grid(True, linewidth=0.5)
+        plt.tight_layout()
 
-    fig_path = metrics_dir / "sam_iou_scatter.png"
-    plt.savefig(fig_path)
-    plt.close()
+        fig_path = metrics_dir / "sam_iou_scatter.png"
+        plt.savefig(fig_path)
+        plt.close()
 
-    print(f"\nSaved SAM IoU CSV -> {csv_path}")
-    print(f"Saved SAM IoU scatter -> {fig_path}")
-else:
-    print("\nNo SAM results collected (sam_ckpt not set or no fragments found).")
+        print(f"\nSaved SAM IoU CSV -> {csv_path}")
+        print(f"Saved SAM IoU scatter -> {fig_path}")
+    else:
+        print("\nNo SAM results collected (sam_ckpt not set or no fragments found).")
 
 
 
