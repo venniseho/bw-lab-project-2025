@@ -6,3 +6,10 @@ python coco_pipeline_revised.py \
   --save_instances \
   --sam_ckpt checkpoints/sam_vit_h_4b8939.pth \
   --sam_model_type vit_h
+
+dependencies
+- COCO dataset
+- SAM checkpoints
+- pycocotools 
+- SAM
+- opencv-python
