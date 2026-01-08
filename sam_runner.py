@@ -28,6 +28,8 @@ from segment_anything import sam_model_registry, SamPredictor
 _SAM = None
 _PREDICTOR = None
 _DEVICE = None
+_SAM_CKPT = None
+_SAM_TYPE = None
 
 
 def init_sam(
@@ -37,20 +39,28 @@ def init_sam(
 ):
     """
     Lazy-init SAM + point-prompt predictor.
-    Call this once before segmenting images.
+
+    NOTE: If you call init_sam with a different checkpoint/model_type later,
+    it will re-load SAM to avoid silent mismatch bugs.
     """
-    global _SAM, _PREDICTOR, _DEVICE
-    if _SAM is not None:
+    global _SAM, _PREDICTOR, _DEVICE, _SAM_CKPT, _SAM_TYPE
+
+    # If already loaded with same config, do nothing
+    if _SAM is not None and _SAM_CKPT == sam_checkpoint and _SAM_TYPE == model_type:
         return
 
+    # Otherwise, re-init
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     _DEVICE = device
 
     sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
     sam.to(device=device)
+
     _SAM = sam
     _PREDICTOR = SamPredictor(sam)
+    _SAM_CKPT = sam_checkpoint
+    _SAM_TYPE = model_type
 
 
 # ------------------------------------------------------------
@@ -119,9 +129,7 @@ def segment_with_sam_point(
 
     if gt_mask_u8 is not None:
         gt_bool = gt_mask_u8 > 0
-        best_idx = int(
-            np.argmax([_iou_bool(gt_bool, m.astype(bool)) for m in masks])
-        )
+        best_idx = int(np.argmax([_iou_bool(gt_bool, m.astype(bool)) for m in masks]))
     else:
         best_idx = int(np.argmax(scores))
 
@@ -214,7 +222,7 @@ def run_sam_on_pair(
     seg_frag, pt_frag = segment_with_sam_point(frag, gt_frag)
     ov_frag = overlay_mask(frag, seg_frag, point=pt_frag)
 
-    # IoUs (IMPORTANT: use the correctly resized GTs)
+    # IoUs
     iou_orig = iou_u8(gt_orig, seg_orig)
     iou_frag = iou_u8(gt_frag, seg_frag)
 

@@ -11,5 +11,6 @@ dependencies
 - COCO dataset
 - SAM checkpoints
 - pycocotools 
-- SAM
+- segment_anything
 - opencv-python
+- torchvision
