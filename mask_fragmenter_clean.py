@@ -13,19 +13,20 @@ Requires: numpy, opencv-python
 --------------------------------------------------------------
 """
 
+import json
 import os
 import time
+from pathlib import Path
+
 import cv2
-import numpy as np
-import math
-import json
 import matplotlib.pyplot as plt
+import numpy as np
 
 # ==========================================================
 # -------------------- Helper functions --------------------
 # ==========================================================
 
-def ensure_binary(mask):
+def ensure_binary(mask: np.ndarray) -> np.ndarray:
     """
     Make a clean binary mask where OBJECT is white (255) and
     background is black (0). If the initial threshold yields
@@ -47,7 +48,7 @@ def ensure_binary(mask):
     return mask
 
 
-def largest_external_contour(mask_u8):
+def largest_external_contour(mask_u8: np.ndarray):
     cnts, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL,
                                cv2.CHAIN_APPROX_NONE)
     if not cnts:
@@ -55,7 +56,7 @@ def largest_external_contour(mask_u8):
     return max(cnts, key=cv2.contourArea)
 
 
-def resample_polyline(poly, step_px=3):
+def resample_polyline(poly: np.ndarray, step_px: int = 3) -> np.ndarray:
     pts = poly.reshape(-1, 2).astype(np.float32)
     if len(pts) < 2:
         return pts
@@ -79,13 +80,21 @@ def resample_polyline(poly, step_px=3):
     return np.array(out, dtype=np.float32)
 
 
-def rasterize_line_mask(h, w, x1, y1, x2, y2, thickness=1):
+def rasterize_line_mask(
+    h: int,
+    w: int,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    thickness: int = 1,
+) -> np.ndarray:
     m = np.zeros((h, w), np.uint8)
     cv2.line(m, (int(x1), int(y1)), (int(x2), int(y2)), 255, thickness)
     return m
 
 
-def mark_occupied(occ, seg_mask, pad=0):
+def mark_occupied(occ: np.ndarray, seg_mask: np.ndarray, pad: int = 0) -> np.ndarray:
     if pad > 0:
         k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
                                       (2 * pad + 1, 2 * pad + 1))
@@ -95,7 +104,7 @@ def mark_occupied(occ, seg_mask, pad=0):
     return np.maximum(occ, seg)
 
 
-def intersects(occ, seg_mask, pad=0):
+def intersects(occ: np.ndarray, seg_mask: np.ndarray, pad: int = 0) -> bool:
     if pad > 0:
         k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
                                       (2 * pad + 1, 2 * pad + 1))
@@ -103,18 +112,20 @@ def intersects(occ, seg_mask, pad=0):
     return np.any((occ > 0) & (seg_mask > 0))
 
 
-def approx_perimeter(mask_u8):
+def approx_perimeter(mask_u8: np.ndarray) -> float:
     cnt = largest_external_contour(mask_u8)
     if cnt is None:
         return 0.0
     return float(cv2.arcLength(cnt, closed=True))
 
 
-def choose_edge_and_gap(perimeter_px,
-                        target_frag_per_100px=6,
-                        min_edge=10,
-                        max_edge=24,
-                        gap_factor=0.35):
+def choose_edge_and_gap(
+    perimeter_px: float,
+    target_frag_per_100px: float = 6,
+    min_edge: int = 10,
+    max_edge: int = 24,
+    gap_factor: float = 0.35,
+):
     desired = int(round(100.0 / max(1, target_frag_per_100px)))
     edge_len = int(np.clip(desired, min_edge, max_edge))
     return edge_len, gap_factor
@@ -202,16 +213,19 @@ def nearest_neighbor_distances(points: np.ndarray) -> np.ndarray:
     nn = np.min(dists, axis=1)
     return nn.astype(np.float32)
 
-def save_histogram(data: np.ndarray,
-                   bins: int,
-                   title: str,
-                   xlabel: str,
-                   out_path: str):
+def save_histogram(
+    data: np.ndarray,
+    bins: int,
+    title: str,
+    xlabel: str,
+    out_path: Path,
+):
     """
     Save a 1D histogram of 'data' to out_path as PNG.
     If data is empty, it creates an empty plot with a note.
     """
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     plt.figure()
     if data is not None and len(data) > 0:
@@ -256,7 +270,7 @@ def compute_and_save_metrics(
     noise_segs: np.ndarray,
     mask_u8: np.ndarray,
     frag_canvas: np.ndarray,
-    out_dir: str,
+    out_dir: Path,
     stem: str,
 ):
     """
@@ -312,8 +326,8 @@ def compute_and_save_metrics(
     outside_cov_fraction = float(outside_cov) / img_area
 
     # prepare metrics directory
-    metrics_dir = os.path.join(out_dir, "metrics")
-    os.makedirs(metrics_dir, exist_ok=True)
+    metrics_dir = Path(out_dir) / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
 
     # ---- save numeric metrics as JSON ----
     metrics = {
@@ -345,7 +359,7 @@ def compute_and_save_metrics(
         },
     }
 
-    json_path = os.path.join(metrics_dir, f"{stem}_metrics.json")
+    json_path = metrics_dir / f"{stem}_metrics.json"
     with open(json_path, "w") as f:
         json.dump(metrics, f, indent=2)
 
@@ -356,14 +370,14 @@ def compute_and_save_metrics(
         bins=18,
         title="Outline orientation (deg)",
         xlabel="degrees [0, 180)",
-        out_path=os.path.join(metrics_dir, f"{stem}_outline_orientation_hist.png"),
+        out_path=metrics_dir / f"{stem}_outline_orientation_hist.png",
     )
     save_histogram(
         ori_noise,
         bins=18,
         title="Noise orientation (deg)",
         xlabel="degrees [0, 180)",
-        out_path=os.path.join(metrics_dir, f"{stem}_noise_orientation_hist.png"),
+        out_path=metrics_dir / f"{stem}_noise_orientation_hist.png",
     )
 
     # nearest-neighbor distances
@@ -372,14 +386,14 @@ def compute_and_save_metrics(
         bins=20,
         title="Outline NN distances (px)",
         xlabel="pixels",
-        out_path=os.path.join(metrics_dir, f"{stem}_outline_nn_hist.png"),
+        out_path=metrics_dir / f"{stem}_outline_nn_hist.png",
     )
     save_histogram(
         nn_noise,
         bins=20,
         title="Noise NN distances (px)",
         xlabel="pixels",
-        out_path=os.path.join(metrics_dir, f"{stem}_noise_nn_hist.png"),
+        out_path=metrics_dir / f"{stem}_noise_nn_hist.png",
     )
 
     # lengths
@@ -388,23 +402,30 @@ def compute_and_save_metrics(
         bins=20,
         title="Outline segment lengths (px)",
         xlabel="pixels",
-        out_path=os.path.join(metrics_dir, f"{stem}_outline_length_hist.png"),
+        out_path=metrics_dir / f"{stem}_outline_length_hist.png",
     )
     save_histogram(
         len_noise,
         bins=20,
         title="Noise segment lengths (px)",
         xlabel="pixels",
-        out_path=os.path.join(metrics_dir, f"{stem}_noise_length_hist.png"),
+        out_path=metrics_dir / f"{stem}_noise_length_hist.png",
     )
 
 # ==========================================================
 # --------- Contour → segments (scan & random) -------------
 # ==========================================================
 
-def contour_to_segments(pts, edge_len=18, gap_px=(0, 6), jitter_deg=15,
-                        shape=None, thickness=1, sep_pad=1,
-                        stick_to_contour=False):
+def contour_to_segments(
+    pts: np.ndarray,
+    edge_len: int = 18,
+    gap_px: tuple[int, int] = (0, 6),
+    jitter_deg: int = 15,
+    shape=None,
+    thickness: int = 1,
+    sep_pad: int = 1,
+    stick_to_contour: bool = False,
+):
     """
     Walk along polyline and break it into short chords.
     - If stick_to_contour=True: NO rotation; segments hug boundary.
@@ -460,8 +481,14 @@ def contour_to_segments(pts, edge_len=18, gap_px=(0, 6), jitter_deg=15,
 
 
 def contour_to_segments_random(
-    pts, edge_len=18, max_segments=None, jitter_deg=15,
-    shape=None, thickness=1, sep_pad=1, max_tries=2000
+    pts: np.ndarray,
+    edge_len: int = 18,
+    max_segments: int | None = None,
+    jitter_deg: int = 15,
+    shape=None,
+    thickness: int = 1,
+    sep_pad: int = 1,
+    max_tries: int = 2000,
 ):
     """
     Rejection-sampling version:
@@ -520,9 +547,18 @@ def contour_to_segments_random(
 # --------------- Background noise generators --------------
 # ==========================================================
 
-def random_noise_segments(h, w, n_per_cell=1, cell=40, length=18,
-                          thickness=1, avoid=None, sep_pad=1,
-                          occ=None, tries=6):
+def random_noise_segments(
+    h: int,
+    w: int,
+    n_per_cell: int = 1,
+    cell: int = 40,
+    length: int = 18,
+    thickness: int = 1,
+    avoid=None,
+    sep_pad: int = 1,
+    occ=None,
+    tries: int = 6,
+):
     """
     Old grid-based background noise (kept for compatibility).
     """
@@ -564,9 +600,18 @@ def random_noise_segments(h, w, n_per_cell=1, cell=40, length=18,
     return np.array(segs, dtype=np.float32), occ
 
 
-def random_noise_segments_uniform(h, w, count=300, length=18, thickness=1,
-                                  avoid=None, sep_pad=1, occ=None, tries=10,
-                                  region="any"):
+def random_noise_segments_uniform(
+    h: int,
+    w: int,
+    count: int = 300,
+    length: int = 18,
+    thickness: int = 1,
+    avoid=None,
+    sep_pad: int = 1,
+    occ=None,
+    tries: int = 10,
+    region: str = "any",
+):
     """
     Place 'count' random short lines.
     region: "any" | "inside" | "outside" with respect to 'avoid' mask.
@@ -612,12 +657,17 @@ def random_noise_segments_uniform(h, w, count=300, length=18, thickness=1,
     return np.array(segs, dtype=np.float32), occ
 
 
-def draw_segments(canvas, segments, color=(255, 255, 255), thickness=1):
+def draw_segments(
+    canvas: np.ndarray,
+    segments: np.ndarray,
+    color=(255, 255, 255),
+    thickness: int = 1,
+) -> None:
     for x1, y1, x2, y2 in segments.astype(int):
         cv2.line(canvas, (x1, y1), (x2, y2), color, thickness)
 
 
-def panel3(orig, frag, mask):
+def panel3(orig: np.ndarray, frag: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """
     Simple 1×3 panel: [original | fragmented | mask]
     """
@@ -628,6 +678,143 @@ def panel3(orig, frag, mask):
 # ==========================================================
 # -------------------- Main pipeline -----------------------
 # ==========================================================
+
+def _load_image_and_mask(image_path: str, mask_path: str) -> tuple[np.ndarray, np.ndarray]:
+    img = cv2.imread(image_path)
+    if img is None:
+        raise FileNotFoundError(f"cannot read image: {image_path}")
+
+    mask = ensure_binary(cv2.imread(mask_path, 0))
+    mask = cv2.resize(mask, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_NEAREST)
+    return img, mask
+
+
+def _generate_outline_segments(
+    mask: np.ndarray,
+    edge_len: int,
+    grid: int,
+    gap_factor: float,
+    jitter_deg: int,
+    thickness: int,
+    sep_pad: int,
+    outline_mode: str,
+    max_outline_segments: int | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    cnt = largest_external_contour(mask)
+    if cnt is None:
+        raise RuntimeError("no contour found in mask")
+
+    pts = resample_polyline(cnt, step_px=3)
+    if outline_mode == "random":
+        return contour_to_segments_random(
+            pts,
+            edge_len=edge_len,
+            max_segments=max_outline_segments,
+            jitter_deg=jitter_deg,
+            shape=mask.shape[:2],
+            thickness=thickness,
+            sep_pad=max(1, sep_pad),
+        )
+
+    return contour_to_segments(
+        pts,
+        edge_len=edge_len,
+        gap_px=(0, int(gap_factor * grid)),
+        jitter_deg=jitter_deg,
+        shape=mask.shape[:2],
+        thickness=thickness,
+        sep_pad=max(1, sep_pad),
+        stick_to_contour=(jitter_deg == 0),
+    )
+
+
+def _generate_noise_segments(
+    mask: np.ndarray,
+    occ: np.ndarray,
+    edge_len: int,
+    thickness: int,
+    sep_pad: int,
+    noise_mode: str,
+    noise_per_cell: int,
+    grid: int,
+    noise_count: int,
+    inside_noise_count: int | None,
+    outside_noise_count: int | None,
+    inside_noise_len: int | None,
+    outside_noise_len: int | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    H, W = mask.shape[:2]
+    if noise_mode == "grid":
+        return random_noise_segments(
+            H,
+            W,
+            n_per_cell=noise_per_cell,
+            cell=grid,
+            length=edge_len,
+            thickness=thickness,
+            avoid=mask,
+            sep_pad=max(1, sep_pad),
+            occ=occ,
+            tries=6,
+        )
+
+    if inside_noise_count is None and outside_noise_count is None:
+        return random_noise_segments_uniform(
+            H,
+            W,
+            count=int(noise_count),
+            length=edge_len,
+            thickness=thickness,
+            avoid=mask,
+            sep_pad=max(1, sep_pad),
+            occ=occ,
+            tries=10,
+            region="any",
+        )
+
+    all_noise = []
+    if inside_noise_count is None:
+        inside_noise_count = noise_count
+    if outside_noise_count is None:
+        outside_noise_count = noise_count
+    if inside_noise_len is None:
+        inside_noise_len = edge_len
+    if outside_noise_len is None:
+        outside_noise_len = edge_len
+
+    if inside_noise_count > 0:
+        segs_in, occ = random_noise_segments_uniform(
+            H,
+            W,
+            count=int(inside_noise_count),
+            length=inside_noise_len,
+            thickness=thickness,
+            avoid=mask,
+            sep_pad=max(1, sep_pad),
+            occ=occ,
+            tries=10,
+            region="inside",
+        )
+        all_noise.append(segs_in)
+
+    if outside_noise_count > 0:
+        segs_out, occ = random_noise_segments_uniform(
+            H,
+            W,
+            count=int(outside_noise_count),
+            length=outside_noise_len,
+            thickness=thickness,
+            avoid=mask,
+            sep_pad=max(1, sep_pad),
+            occ=occ,
+            tries=10,
+            region="outside",
+        )
+        all_noise.append(segs_out)
+
+    noise_segs = np.vstack(all_noise) if all_noise else np.zeros((0, 4), np.float32)
+    return noise_segs, occ
+
 
 def fragment_one(
     image_path,
@@ -655,16 +842,11 @@ def fragment_one(
     """
     t0 = time.perf_counter()
 
-    os.makedirs(out_dir, exist_ok=True)
-    name = os.path.splitext(os.path.basename(image_path))[0]
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    name = Path(image_path).stem
 
-    img = cv2.imread(image_path)
-    if img is None:
-        raise FileNotFoundError(f"cannot read image: {image_path}")
-    H, W = img.shape[:2]
-
-    mask = ensure_binary(cv2.imread(mask_path, 0))
-    mask = cv2.resize(mask, (W, H), interpolation=cv2.INTER_NEAREST)
+    img, mask = _load_image_and_mask(image_path, mask_path)
 
     # auto density from outline if edge_len < 0
     if edge_len is None or edge_len < 0:
@@ -677,116 +859,47 @@ def fragment_one(
         )
 
     # 1) outline contour → segments
-    cnt = largest_external_contour(mask)
-    if cnt is None:
-        raise RuntimeError(f"no contour found in mask: {mask_path}")
-
-    pts = resample_polyline(cnt, step_px=3)
-
-    if outline_mode == "random":
-        contour_segs, occ = contour_to_segments_random(
-            pts,
-            edge_len=edge_len,
-            max_segments=max_outline_segments,
-            jitter_deg=jitter_deg,
-            shape=(H, W),
-            thickness=thickness,
-            sep_pad=max(1, sep_pad),
-        )
-    else:  # "scan"
-        contour_segs, occ = contour_to_segments(
-            pts,
-            edge_len=edge_len,
-            gap_px=(0, int(gap_factor * grid)),
-            jitter_deg=jitter_deg,
-            shape=(H, W),
-            thickness=thickness,
-            sep_pad=max(1, sep_pad),
-            stick_to_contour=(jitter_deg == 0),
-        )
+    contour_segs, occ = _generate_outline_segments(
+        mask=mask,
+        edge_len=edge_len,
+        grid=grid,
+        gap_factor=gap_factor,
+        jitter_deg=jitter_deg,
+        thickness=thickness,
+        sep_pad=sep_pad,
+        outline_mode=outline_mode,
+        max_outline_segments=max_outline_segments,
+    )
 
     frag = np.zeros_like(img)
     draw_segments(frag, contour_segs,
                   color=(255, 255, 255), thickness=thickness)
-    cv2.imwrite(os.path.join(out_dir, f"{name}_outline.png"), frag)
+    cv2.imwrite(str(out_dir / f"{name}_outline.png"), frag)
 
     # 2) background noise
-    if noise_mode == "grid":
-        noise_segs, occ = random_noise_segments(
-            H, W,
-            n_per_cell=noise_per_cell,
-            cell=grid,
-            length=edge_len,
-            thickness=thickness,
-            avoid=mask,
-            sep_pad=max(1, sep_pad),
-            occ=occ,
-            tries=6,
-        )
-    else:
-        # uniform random; optionally separate inside vs outside
-        if inside_noise_count is None and outside_noise_count is None:
-            noise_segs, occ = random_noise_segments_uniform(
-                H, W,
-                count=int(noise_count),
-                length=edge_len,
-                thickness=thickness,
-                avoid=mask,
-                sep_pad=max(1, sep_pad),
-                occ=occ,
-                tries=10,
-                region="any",
-            )
-        else:
-            all_noise = []
-            # default counts/lengths
-            if inside_noise_count is None:
-                inside_noise_count = noise_count
-            if outside_noise_count is None:
-                outside_noise_count = noise_count
-            if inside_noise_len is None:
-                inside_noise_len = edge_len
-            if outside_noise_len is None:
-                outside_noise_len = edge_len
-
-            if inside_noise_count > 0:
-                segs_in, occ = random_noise_segments_uniform(
-                    H, W,
-                    count=int(inside_noise_count),
-                    length=inside_noise_len,
-                    thickness=thickness,
-                    avoid=mask,
-                    sep_pad=max(1, sep_pad),
-                    occ=occ,
-                    tries=10,
-                    region="inside",
-                )
-                all_noise.append(segs_in)
-
-            if outside_noise_count > 0:
-                segs_out, occ = random_noise_segments_uniform(
-                    H, W,
-                    count=int(outside_noise_count),
-                    length=outside_noise_len,
-                    thickness=thickness,
-                    avoid=mask,
-                    sep_pad=max(1, sep_pad),
-                    occ=occ,
-                    tries=10,
-                    region="outside",
-                )
-                all_noise.append(segs_out)
-
-            noise_segs = np.vstack(all_noise) if all_noise else np.zeros((0, 4),
-                                                                         np.float32)
+    noise_segs, occ = _generate_noise_segments(
+        mask=mask,
+        occ=occ,
+        edge_len=edge_len,
+        thickness=thickness,
+        sep_pad=sep_pad,
+        noise_mode=noise_mode,
+        noise_per_cell=noise_per_cell,
+        grid=grid,
+        noise_count=noise_count,
+        inside_noise_count=inside_noise_count,
+        outside_noise_count=outside_noise_count,
+        inside_noise_len=inside_noise_len,
+        outside_noise_len=outside_noise_len,
+    )
 
     draw_segments(frag, noise_segs,
                   color=(220, 220, 220), thickness=thickness)
 
-    out_frag = os.path.join(out_dir, f"{name}_fragmented.png")
-    out_panel = os.path.join(out_dir, f"{name}_panel.png")
-    cv2.imwrite(out_frag, frag)
-    cv2.imwrite(out_panel, panel3(img, frag, mask))
+    out_frag = out_dir / f"{name}_fragmented.png"
+    out_panel = out_dir / f"{name}_panel.png"
+    cv2.imwrite(str(out_frag), frag)
+    cv2.imwrite(str(out_panel), panel3(img, frag, mask))
 
     t1 = time.perf_counter()
     print(f"saved: {out_frag} and {out_panel}  | "
@@ -808,26 +921,26 @@ def fragment_one(
 # ----------------------- Script entry ---------------------
 # ==========================================================
 
-if __name__ == "__main__":
-    IMAGES_DIR = "images"
-    MASKS_DIR = "masks"
-    OUT_DIR = "output"
+def main():
+    images_dir = Path("images")
+    masks_dir = Path("masks")
+    out_dir = Path("output")
 
-    for fname in os.listdir(IMAGES_DIR):
+    for fname in os.listdir(images_dir):
         if not fname.lower().endswith((".png", ".jpg", ".jpeg")):
             continue
 
-        stem = os.path.splitext(fname)[0]
-        img_p = os.path.join(IMAGES_DIR, fname)
-        msk_p = os.path.join(MASKS_DIR, stem + "_mask.png")
-        if not os.path.exists(msk_p):
+        stem = Path(fname).stem
+        img_p = images_dir / fname
+        msk_p = masks_dir / f"{stem}_mask.png"
+        if not msk_p.exists():
             print(f"⚠ skip {fname} — no mask found at {msk_p}")
             continue
 
         fragment_one(
-            img_p,
-            msk_p,
-            OUT_DIR,
+            str(img_p),
+            str(msk_p),
+            str(out_dir),
             edge_len=-1,                  # auto from perimeter
             target_frag_per_100px=7,      # denser outline
             grid=40,
@@ -844,3 +957,7 @@ if __name__ == "__main__":
             inside_noise_len=12,
             outside_noise_len=16,
         )
+
+
+if __name__ == "__main__":
+    main()
