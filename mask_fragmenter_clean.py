@@ -17,7 +17,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional 
 
 import cv2
 import matplotlib.pyplot as plt
@@ -822,6 +822,7 @@ def fragment_one(
     image_path,
     mask_path,
     out_dir,
+    output_stem: Optional[str] = None,
     edge_len=-1,
     grid=40,
     gap_factor=0.4,
@@ -854,7 +855,7 @@ def fragment_one(
     outlines_dir.mkdir(parents=True, exist_ok=True)
     panels_dir.mkdir(parents=True, exist_ok=True)
     metrics_dir.mkdir(parents=True, exist_ok=True)
-    name = Path(image_path).stem
+    name = output_stem or Path(image_path).stem
 
     img, mask = _load_image_and_mask(image_path, mask_path)
 
@@ -965,8 +966,8 @@ def main():
             max_outline_segments=None,
             inside_noise_count=1100,
             outside_noise_count=600,
-            inside_noise_len=12,
-            outside_noise_len=16,
+            inside_noise_len=6,
+            outside_noise_len=8,
         )
 
 

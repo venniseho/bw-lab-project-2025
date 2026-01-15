@@ -22,7 +22,8 @@ pip install \
     scikit-learn \
     opencv-python \
     pycocotools \
-    torchvision
+    torchvision \ 
+    pytest
 
 # 3. Install Segment Anything
 if [ ! -d "segment-anything" ]; then

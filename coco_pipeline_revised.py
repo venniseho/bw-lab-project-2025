@@ -1,7 +1,7 @@
 """
 coco_pipeline_revised.py
 --------------------------------------------------------------
-COCO → union mask → fragmented-contour stimuli
+COCO → per-instance mask → fragmented-contour stimuli
 
 Also (optional):
   - run SAM on original + fragmented with a centroid point prompt
@@ -67,7 +67,7 @@ def get_image_annotation_info(coco, img_id):
     return img_info, anns
 
 
-def get_binary_masks(coco, anns, H, W):
+def get_instance_masks(coco, anns, H, W):
     masks = []
     for a in anns:
         m = coco.annToMask(a)
@@ -75,7 +75,7 @@ def get_binary_masks(coco, anns, H, W):
             continue
         if m.shape != (H, W):
             m = cv2.resize(m.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST)
-        masks.append((m.astype(np.uint8) & 1))
+        masks.append(a, (m.astype(np.uint8) & 1))
     return masks
 
 
@@ -86,14 +86,11 @@ def main():
     ap.add_argument("--coco_imgdir", required=True, help="folder with COCO images (e.g., COCO/val2014 or COCO)")
     ap.add_argument("--out_root", default="outputs/coco_pipeline_revised", help="where to write outputs")
     ap.add_argument("--limit", type=int, default=10, help="max images to process")
-    ap.add_argument("--save_instances", action="store_true",
-                    help="Also save per-instance masks and outline-only fragments")
-
-    # Mask filtering (helps avoid tiny GT masks dominating IoU weirdness)
+    # Instance mask filtering (helps avoid tiny outlines)
     ap.add_argument("--min_mask_area", type=int, default=5000,
-                    help="Skip images whose union mask area < this many pixels")
+                    help="Skip instance masks whose area < this many pixels")
     ap.add_argument("--min_mask_frac", type=float, default=0.01,
-                    help="Skip images whose union mask covers < this fraction of the image")
+                    help="Skip instance masks whose area fraction < this value")
 
     # Fragmentation params
     ap.add_argument("--target_frag_per_100px", type=float, default=6.0)
@@ -119,7 +116,6 @@ def main():
     out_masks = out_root / "masks"
     out_fragments = out_root
     out_fragment_images = out_root / "fragments"
-    out_inst_root = out_root / "instances"
     out_sam_overlays = out_root / "sam_overlays"
     out_metrics = out_root / "metrics"
 
@@ -128,8 +124,6 @@ def main():
     out_fragments.mkdir(parents=True, exist_ok=True)
     out_metrics.mkdir(parents=True, exist_ok=True)
     out_sam_overlays.mkdir(parents=True, exist_ok=True)
-    if args.save_instances:
-        out_inst_root.mkdir(parents=True, exist_ok=True)
 
     coco = COCO(args.coco_ann)
     print(f"Loaded {len(coco.imgs)} images and {len(coco.anns)} annotations.\n")
@@ -161,112 +155,89 @@ def main():
             continue
         H, W = img_bgr.shape[:2]
 
-        masks = get_binary_masks(coco, anns, H, W)
+        masks = get_instance_masks(coco, anns, H, W)
         if not masks:
             continue
 
-        union = np.zeros((H, W), dtype=np.uint8)
-        for m in masks:
-            union |= m
-
-        union_area = int(union.sum())  # since union is 0/1
-        union_frac = float(union_area) / float(H * W)
-
-        # Filter tiny masks
-        if union_area < args.min_mask_area or union_frac < args.min_mask_frac:
-            continue
-
-        union_u8 = (union * 255).astype(np.uint8)
-
         stem = Path(file_name).stem
         dst_img = out_images / f"{stem}.png"
-        dst_mask = out_masks / f"{stem}_mask.png"
         cv2.imwrite(str(dst_img), img_bgr)
-        cv2.imwrite(str(dst_mask), union_u8)
 
-        # Fragmenter: scan outline (follows mask boundary)
-        frag.fragment_one(
-            image_path=str(dst_img),
-            mask_path=str(dst_mask),
-            out_dir=str(out_fragments),
-            edge_len=-1,
-            target_frag_per_100px=args.target_frag_per_100px,
-            grid=args.grid,
-            gap_factor=args.gap_factor,
-            jitter_deg=args.jitter_deg,
-            thickness=args.thickness,
-            noise_mode=args.noise_mode,
-            noise_count=args.noise_count,
-            sep_pad=args.sep_pad,
-            noise_per_cell=1,
-            outline_mode="scan",
-            max_outline_segments=None,
-        )
+        kept_instances = 0
+        for a, m in masks:
+            ann_id = a.get("id", "N")
+            inst_area = int(m.sum())
+            inst_frac = float(inst_area) / float(H * W)
+            if inst_area < args.min_mask_area or inst_frac < args.min_mask_frac:
+                continue
 
-        # optional per-instance
-        if args.save_instances:
-            for a, m in zip(anns, masks):
-                ann_id = a.get("id", "N")
-                m_u8 = (m * 255).astype(np.uint8)
-                inst_mask_path = out_masks / f"{stem}_ann{ann_id}.png"
-                cv2.imwrite(str(inst_mask_path), m_u8)
+            m_u8 = (m * 255).astype(np.uint8)
+            inst_mask_path = out_masks / f"{stem}_ann{ann_id}.png"
+            cv2.imwrite(str(inst_mask_path), m_u8)
 
-                frag.fragment_one(
-                    image_path=str(dst_img),
-                    mask_path=str(inst_mask_path),
-                    out_dir=str(out_inst_root),
-                    edge_len=-1,
-                    target_frag_per_100px=args.target_frag_per_100px,
-                    grid=args.grid,
-                    gap_factor=args.gap_factor,
-                    jitter_deg=0,
-                    thickness=args.thickness,
-                    noise_mode="uniform",
-                    noise_count=0,
-                    sep_pad=args.sep_pad,
-                    noise_per_cell=0,
-                    outline_mode="scan",
-                    max_outline_segments=None,
-                )
+            instance_stem = f"{stem}_ann{ann_id}"
+            frag.fragment_one(
+                image_path=str(dst_img),
+                mask_path=str(inst_mask_path),
+                out_dir=str(out_fragments),
+                output_stem=instance_stem,
+                edge_len=-1,
+                target_frag_per_100px=args.target_frag_per_100px,
+                grid=args.grid,
+                gap_factor=args.gap_factor,
+                jitter_deg=args.jitter_deg,
+                thickness=args.thickness,
+                noise_mode=args.noise_mode,
+                noise_count=args.noise_count,
+                sep_pad=args.sep_pad,
+                noise_per_cell=1,
+                outline_mode="scan",
+                max_outline_segments=None,
+            )
+
+            kept_instances += 1
+
+            if args.sam_ckpt:
+                frag_img_path = out_fragment_images / f"{instance_stem}_fragmented.png"
+                if frag_img_path.exists():
+                    t_sam0 = time.perf_counter()
+                    result = run_sam_on_pair(
+                        orig_img_path=str(dst_img),
+                        frag_img_path=str(frag_img_path),
+                        gt_mask_path=str(inst_mask_path),
+                        out_dir=str(out_sam_overlays),
+                        sam_checkpoint=args.sam_ckpt,
+                        model_type=sam_model_type,
+                        device=None,
+                    )
+                    t_sam1 = time.perf_counter()
+
+                    sam_rows.append({
+                        "stem": result["stem"],
+                        "iou_orig": float(result["iou_orig"]),
+                        "iou_frag": float(result["iou_frag"]),
+                    })
+
+                    print(
+                        f"   SAM took {t_sam1 - t_sam0:.3f}s"
+                        f" | IoU(orig)={result['iou_orig']:.3f} IoU(frag)={result['iou_frag']:.3f}"
+                    )
+
+        if kept_instances == 0:
+            continue
 
         processed += 1
         t_img1 = time.perf_counter()
-        print(f"[{processed}] {file_name} processed in {t_img1 - t_img0:.3f}s (instances={len(masks)} | mask_frac={union_frac:.3f})")
-
-        # SAM (optional)
-        if args.sam_ckpt:
-            frag_img_path = out_fragment_images / f"{stem}_fragmented.png"
-            if frag_img_path.exists():
-                t_sam0 = time.perf_counter()
-                result = run_sam_on_pair(
-                    orig_img_path=str(dst_img),
-                    frag_img_path=str(frag_img_path),
-                    gt_mask_path=str(dst_mask),
-                    out_dir=str(out_sam_overlays),
-                    sam_checkpoint=args.sam_ckpt,
-                    model_type=sam_model_type,
-                    device=None,
-                )
-                t_sam1 = time.perf_counter()
-
-                sam_rows.append({
-                    "stem": result["stem"],
-                    "iou_orig": float(result["iou_orig"]),
-                    "iou_frag": float(result["iou_frag"]),
-                })
-
-                print(
-                    f"   SAM took {t_sam1 - t_sam0:.3f}s"
-                    f" | IoU(orig)={result['iou_orig']:.3f} IoU(frag)={result['iou_frag']:.3f}"
-                )
+        print(
+            f"[{processed}] {file_name} processed in {t_img1 - t_img0:.3f}s "
+            f"(instances={len(masks)} | kept={kept_instances})"
+        )
 
     t_total1 = time.perf_counter()
     print(f"\nDone. Processed {processed} images in {t_total1 - t_total0:.3f}s.")
     print(f"Images           -> {out_images}")
     print(f"Masks            -> {out_masks}")
     print(f"Fragment outputs -> {out_fragment_images}")
-    if args.save_instances:
-        print(f"Instance outputs  -> {out_inst_root}")
 
     # Write SAM IoU CSV
     if len(sam_rows) > 0:
