@@ -822,6 +822,7 @@ def fragment_one(
     image_path,
     mask_path,
     out_dir,
+    output_stem: Optional[str] = None,
     edge_len=-1,
     grid=40,
     gap_factor=0.4,
@@ -854,7 +855,7 @@ def fragment_one(
     outlines_dir.mkdir(parents=True, exist_ok=True)
     panels_dir.mkdir(parents=True, exist_ok=True)
     metrics_dir.mkdir(parents=True, exist_ok=True)
-    name = Path(image_path).stem
+    name = output_stem or Path(image_path).stem
 
     img, mask = _load_image_and_mask(image_path, mask_path)
 
