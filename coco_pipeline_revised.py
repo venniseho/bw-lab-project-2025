@@ -84,7 +84,7 @@ def main():
 
     ap.add_argument("--coco_ann", required=True, help="path to instances_*.json")
     ap.add_argument("--coco_imgdir", required=True, help="folder with COCO images (e.g., COCO/val2014 or COCO)")
-    ap.add_argument("--out_root", default=".", help="where to write outputs")
+    ap.add_argument("--out_root", default="outputs/coco_pipeline_revised", help="where to write outputs")
     ap.add_argument("--limit", type=int, default=10, help="max images to process")
     ap.add_argument("--save_instances", action="store_true",
                     help="Also save per-instance masks and outline-only fragments")
@@ -117,16 +117,19 @@ def main():
     out_root = Path(args.out_root)
     out_images = out_root / "images"
     out_masks = out_root / "masks"
-    out_fragments = out_root / "output" / "fragments"
-    out_inst_outlines = out_root / "output" / "instance_outlines"
-    out_metrics = out_root / "output" / "metrics"
+    out_fragments = out_root
+    out_fragment_images = out_root / "fragments"
+    out_inst_root = out_root / "instances"
+    out_sam_overlays = out_root / "sam_overlays"
+    out_metrics = out_root / "metrics"
 
     out_images.mkdir(parents=True, exist_ok=True)
     out_masks.mkdir(parents=True, exist_ok=True)
     out_fragments.mkdir(parents=True, exist_ok=True)
     out_metrics.mkdir(parents=True, exist_ok=True)
+    out_sam_overlays.mkdir(parents=True, exist_ok=True)
     if args.save_instances:
-        out_inst_outlines.mkdir(parents=True, exist_ok=True)
+        out_inst_root.mkdir(parents=True, exist_ok=True)
 
     coco = COCO(args.coco_ann)
     print(f"Loaded {len(coco.imgs)} images and {len(coco.anns)} annotations.\n")
@@ -211,7 +214,7 @@ def main():
                 frag.fragment_one(
                     image_path=str(dst_img),
                     mask_path=str(inst_mask_path),
-                    out_dir=str(out_inst_outlines),
+                    out_dir=str(out_inst_root),
                     edge_len=-1,
                     target_frag_per_100px=args.target_frag_per_100px,
                     grid=args.grid,
@@ -232,14 +235,14 @@ def main():
 
         # SAM (optional)
         if args.sam_ckpt:
-            frag_img_path = out_fragments / f"{stem}_fragmented.png"
+            frag_img_path = out_fragment_images / f"{stem}_fragmented.png"
             if frag_img_path.exists():
                 t_sam0 = time.perf_counter()
                 result = run_sam_on_pair(
                     orig_img_path=str(dst_img),
                     frag_img_path=str(frag_img_path),
                     gt_mask_path=str(dst_mask),
-                    out_dir=str(out_fragments),
+                    out_dir=str(out_sam_overlays),
                     sam_checkpoint=args.sam_ckpt,
                     model_type=sam_model_type,
                     device=None,
@@ -261,9 +264,9 @@ def main():
     print(f"\nDone. Processed {processed} images in {t_total1 - t_total0:.3f}s.")
     print(f"Images           -> {out_images}")
     print(f"Masks            -> {out_masks}")
-    print(f"Fragment outputs -> {out_fragments}")
+    print(f"Fragment outputs -> {out_fragment_images}")
     if args.save_instances:
-        print(f"Instance outlines -> {out_inst_outlines}")
+        print(f"Instance outputs  -> {out_inst_root}")
 
     # Write SAM IoU CSV
     if len(sam_rows) > 0:

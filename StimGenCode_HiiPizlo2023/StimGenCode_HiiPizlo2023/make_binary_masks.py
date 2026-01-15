@@ -4,7 +4,7 @@ import os
 
 # input and output folders
 in_dir = "images"
-out_dir = "masks"
+out_dir = os.path.join("outputs", "stimgen", "masks")
 os.makedirs(out_dir, exist_ok=True)
 
 # loop through every image in your images folder
@@ -28,4 +28,4 @@ for name in os.listdir(in_dir):
     cv2.imwrite(out_path, mask)
     print(f"Saved binary mask: {out_path}")
 
-print("\nAll masks created. in 'masks/' folder.")
+print("\nAll masks created in outputs/stimgen/masks.")

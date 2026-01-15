@@ -2,8 +2,8 @@ import os, cv2, numpy as np
 from egg_dataset_helper import StimParam, EggParam, CanvasParam, ImageParam, VorParam, viz_mat, fillArea_manualRaster
 
 in_dir   = "images"
-mask_dir = "masks"
-out_dir  = "output"
+mask_dir = os.path.join("outputs", "stimgen", "masks")
+out_dir  = os.path.join("outputs", "stimgen", "fragments")
 os.makedirs(out_dir, exist_ok=True)
 
 # Process each image in the input directory
