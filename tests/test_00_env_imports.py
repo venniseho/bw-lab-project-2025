@@ -2,7 +2,6 @@
 Command to run:
 python -m pytest -q tests/test_00_env_imports.py
 """
-#
 
 def test_imports():
     import cv2
@@ -13,6 +12,7 @@ def test_imports():
 
     assert hasattr(cv2, "imread")
     assert hasattr(torch, "cuda")
+
 
 def test_cuda_optional():
     import torch
