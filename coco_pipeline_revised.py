@@ -75,7 +75,7 @@ def get_instance_masks(coco, anns, H, W):
             continue
         if m.shape != (H, W):
             m = cv2.resize(m.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST)
-        masks.append(a, (m.astype(np.uint8) & 1))
+        masks.append((a, (m.astype(np.uint8) & 1)))
     return masks
 
 
