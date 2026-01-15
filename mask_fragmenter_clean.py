@@ -17,7 +17,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional 
 
 import cv2
 import matplotlib.pyplot as plt
@@ -965,8 +965,8 @@ def main():
             max_outline_segments=None,
             inside_noise_count=1100,
             outside_noise_count=600,
-            inside_noise_len=12,
-            outside_noise_len=16,
+            inside_noise_len=6,
+            outside_noise_len=8,
         )
 
 
