@@ -14,7 +14,8 @@ coco_pipeline.py
 --------------------------------------------------------------
 """
 
-import os, argparse, shutil
+import argparse
+import shutil
 from pathlib import Path
 import numpy as np
 import cv2
@@ -25,12 +26,18 @@ from pycocotools.coco import COCO
 import mask_fragmenter_clean as frag
 
 
-def save_mask_png(mask_bool, out_path):
+def save_mask_png(mask_bool: np.ndarray, out_path: Path) -> None:
     mask_u8 = (mask_bool.astype(np.uint8) * 255)
     cv2.imwrite(str(out_path), mask_u8)
 
 
-def build_gt_mask(coco: COCO, img_info, cat_ids=None, min_obj_frac=0.0, fallback_bbox=True):
+def build_gt_mask(
+    coco: COCO,
+    img_info,
+    cat_ids=None,
+    min_obj_frac: float = 0.0,
+    fallback_bbox: bool = True,
+):
     """
     Return a single binary mask by OR-ing selected instances.
     - If cat_ids is None -> use all categories present.
@@ -66,7 +73,12 @@ def build_gt_mask(coco: COCO, img_info, cat_ids=None, min_obj_frac=0.0, fallback
     return mask if (kept > 0 and mask.any()) else None
 
 
-def choose_frag_params(perimeter_px, target_frag_per_100px=6, min_edge=10, max_edge=24):
+def choose_frag_params(
+    perimeter_px: float,
+    target_frag_per_100px: float = 6,
+    min_edge: int = 10,
+    max_edge: int = 24,
+):
     """
     Heuristic to 'check density around outline':
     Given the rough perimeter, choose edge_len so we place about
@@ -81,7 +93,7 @@ def choose_frag_params(perimeter_px, target_frag_per_100px=6, min_edge=10, max_e
     return edge_len, gap_factor
 
 
-def approx_perimeter(mask_u8):
+def approx_perimeter(mask_u8: np.ndarray) -> float:
     cnt = frag.largest_external_contour(mask_u8)
     if cnt is None:
         return 0.0
@@ -120,8 +132,8 @@ def main():
     # resolve & create output folders
     out_root = Path(args.out_root).expanduser().resolve()
     images_dir = out_root / "images"
-    masks_dir  = out_root / "masks"
-    out_dir    = out_root / "output_clean"
+    masks_dir = out_root / "masks"
+    out_dir = out_root / "output_clean"
     images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
