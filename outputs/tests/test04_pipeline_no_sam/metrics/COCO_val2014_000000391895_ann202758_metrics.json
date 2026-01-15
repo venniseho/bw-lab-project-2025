@@ -1,0 +1,39 @@
+{
+  "image_size": {
+    "H": 360,
+    "W": 640,
+    "area_px": 230400.0
+  },
+  "mask_stats": {
+    "H": 360,
+    "W": 640,
+    "area_px": 14104,
+    "area_fraction": 0.06121527777777778,
+    "perimeter_px": 893.8965303897858,
+    "area_perimeter_ratio": 15.778112477794176
+  },
+  "outline": {
+    "num_segments": 18,
+    "density_per_10k_px": 0.78125,
+    "mean_length": 17.056949615478516,
+    "median_length": 16.972679138183594,
+    "mean_nn_dist": 22.33808135986328,
+    "median_nn_dist": 19.320209503173828
+  },
+  "noise": {
+    "num_segments": 400,
+    "density_per_10k_px": 17.36111111111111,
+    "mean_length": 16.885698318481445,
+    "median_length": 17.029386520385742,
+    "mean_nn_dist": 14.968461990356445,
+    "median_nn_dist": 14.21267032623291
+  },
+  "coverage": {
+    "total_cov_px": 6805,
+    "total_cov_fraction": 0.029535590277777777,
+    "inside_cov_px": 522,
+    "inside_cov_fraction": 0.002265625,
+    "outside_cov_px": 6283,
+    "outside_cov_fraction": 0.027269965277777777
+  }
+}
