@@ -7,6 +7,10 @@ coco_pipeline.py
 4) Save:
      images/<file_name>.png
      masks/<stem>_mask.png
+     fragments/<stem>_fragmented.png
+     outlines/<stem>_outline.png
+     panels/<stem>_panel.png
+     metrics/<stem>_*.json
 5) Call mask_fragmenter_clean.fragment_one(...) with:
      - contour density knobs (edge_len, gap_factor, jitter)
      - fully RANDOM background noise (noise_count)
@@ -105,7 +109,8 @@ def main():
     ap = argparse.ArgumentParser(description="COCO → GT masks → fragmented stimuli")
     ap.add_argument("--coco_ann", required=True, help="path to COCO annotations JSON (instances_*.json)")
     ap.add_argument("--coco_imgdir", required=True, help="directory containing the COCO images")
-    ap.add_argument("--out_root", default=".", help="root where images/, masks/, output_clean/ live")
+    ap.add_argument("--out_root", default="outputs/coco_pipeline",
+                    help="root where images/, masks/, fragments/, outlines/, panels/, metrics/ live")
     ap.add_argument("--limit", type=int, default=30, help="max images to process")
     ap.add_argument("--categories", nargs="*", default=None, help="category names to keep (default: all)")
 
@@ -133,10 +138,8 @@ def main():
     out_root = Path(args.out_root).expanduser().resolve()
     images_dir = out_root / "images"
     masks_dir = out_root / "masks"
-    out_dir = out_root / "output_clean"
     images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     ann_path = Path(args.coco_ann).expanduser().resolve()
     imgdir   = Path(args.coco_imgdir).expanduser().resolve()
@@ -166,7 +169,7 @@ def main():
     if not ann_ids:
         print("No annotations found (for selected categories).")
         print("Tip: run without --categories to include all.")
-        print(f"Done. Processed 0 images. Outputs in: {out_dir}")
+        print(f"Done. Processed 0 images. Outputs in: {out_root}")
         return
 
     anns = coco.loadAnns(ann_ids)
@@ -243,7 +246,7 @@ def main():
 
         # ---------- call fragmenter ----------
         frag.fragment_one(
-            str(dst_img), str(dst_msk), str(out_dir),
+            str(dst_img), str(dst_msk), str(out_root),
             edge_len=edge_len,
             grid=40,                    # used for gap calc only
             gap_factor=gap_factor,
@@ -258,7 +261,7 @@ def main():
 
         processed += 1
 
-    print(f"Done. Processed {processed} images. Outputs in: {out_dir}")
+    print(f"Done. Processed {processed} images. Outputs in: {out_root}")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ venv/
 .venv/
 
 # Model checkpoints / weights
+segment-anything/
 checkpoints/
 *.pth
 *.ckpt

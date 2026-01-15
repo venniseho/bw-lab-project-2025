@@ -17,6 +17,7 @@ import json
 import os
 import time
 from pathlib import Path
+from typing import Optional
 
 import cv2
 import matplotlib.pyplot as plt
@@ -272,6 +273,7 @@ def compute_and_save_metrics(
     frag_canvas: np.ndarray,
     out_dir: Path,
     stem: str,
+    metrics_dir: Optional[Path] = None,
 ):
     """
     Compute:
@@ -326,7 +328,7 @@ def compute_and_save_metrics(
     outside_cov_fraction = float(outside_cov) / img_area
 
     # prepare metrics directory
-    metrics_dir = Path(out_dir) / "metrics"
+    metrics_dir = Path(metrics_dir) if metrics_dir is not None else Path(out_dir) / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
     # ---- save numeric metrics as JSON ----
@@ -413,7 +415,7 @@ def compute_and_save_metrics(
     )
 
 # ==========================================================
-# --------- Contour → segments (scan & random) -------------
+# --------- Contour -> segments (scan & random) -------------
 # ==========================================================
 
 def contour_to_segments(
@@ -842,8 +844,16 @@ def fragment_one(
     """
     t0 = time.perf_counter()
 
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_root = Path(out_dir)
+    out_root.mkdir(parents=True, exist_ok=True)
+    fragments_dir = out_root / "fragments"
+    outlines_dir = out_root / "outlines"
+    panels_dir = out_root / "panels"
+    metrics_dir = out_root / "metrics"
+    fragments_dir.mkdir(parents=True, exist_ok=True)
+    outlines_dir.mkdir(parents=True, exist_ok=True)
+    panels_dir.mkdir(parents=True, exist_ok=True)
+    metrics_dir.mkdir(parents=True, exist_ok=True)
     name = Path(image_path).stem
 
     img, mask = _load_image_and_mask(image_path, mask_path)
@@ -874,7 +884,7 @@ def fragment_one(
     frag = np.zeros_like(img)
     draw_segments(frag, contour_segs,
                   color=(255, 255, 255), thickness=thickness)
-    cv2.imwrite(str(out_dir / f"{name}_outline.png"), frag)
+    cv2.imwrite(str(outlines_dir / f"{name}_outline.png"), frag)
 
     # 2) background noise
     noise_segs, occ = _generate_noise_segments(
@@ -896,8 +906,8 @@ def fragment_one(
     draw_segments(frag, noise_segs,
                   color=(220, 220, 220), thickness=thickness)
 
-    out_frag = out_dir / f"{name}_fragmented.png"
-    out_panel = out_dir / f"{name}_panel.png"
+    out_frag = fragments_dir / f"{name}_fragmented.png"
+    out_panel = panels_dir / f"{name}_panel.png"
     cv2.imwrite(str(out_frag), frag)
     cv2.imwrite(str(out_panel), panel3(img, frag, mask))
 
@@ -911,8 +921,9 @@ def fragment_one(
         noise_segs=noise_segs,
         mask_u8=mask,
         frag_canvas=frag,
-        out_dir=out_dir,
+        out_dir=out_root,
         stem=name,
+        metrics_dir=metrics_dir,
     )
 
 
@@ -924,7 +935,7 @@ def fragment_one(
 def main():
     images_dir = Path("images")
     masks_dir = Path("masks")
-    out_dir = Path("output")
+    out_dir = Path("outputs") / "mask_fragmenter"
 
     for fname in os.listdir(images_dir):
         if not fname.lower().endswith((".png", ".jpg", ".jpeg")):
