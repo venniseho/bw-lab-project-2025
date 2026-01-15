@@ -17,6 +17,9 @@ import os
 import time
 import cv2
 import numpy as np
+import math
+import json
+import matplotlib.pyplot as plt
 
 # ==========================================================
 # -------------------- Helper functions --------------------
@@ -116,6 +119,284 @@ def choose_edge_and_gap(perimeter_px,
     edge_len = int(np.clip(desired, min_edge, max_edge))
     return edge_len, gap_factor
 
+# ==========================================================
+# -------------------- Measures --------------------
+# ==========================================================
+def segment_midpoints(segments: np.ndarray) -> np.ndarray:
+    """
+    segments: (N, 4) [x1, y1, x2, y2]
+    returns: (N, 2) midpoints
+    """
+    if segments is None or len(segments) == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+    segs = segments.astype(np.float32)
+    xs = 0.5 * (segs[:, 0] + segs[:, 2])
+    ys = 0.5 * (segs[:, 1] + segs[:, 3])
+    return np.stack([xs, ys], axis=1)
+
+
+def segment_lengths(segments: np.ndarray) -> np.ndarray:
+    """
+    Euclidean length of each segment.
+    """
+    if segments is None or len(segments) == 0:
+        return np.zeros((0,), dtype=np.float32)
+    segs = segments.astype(np.float32)
+    dx = segs[:, 2] - segs[:, 0]
+    dy = segs[:, 3] - segs[:, 1]
+    return np.sqrt(dx * dx + dy * dy)
+
+
+def segment_orientations_deg(segments: np.ndarray) -> np.ndarray:
+    """
+    Orientation of each segment in degrees, modulo 180.
+    (So a line and its opposite direction share orientation.)
+    """
+    if segments is None or len(segments) == 0:
+        return np.zeros((0,), dtype=np.float32)
+    segs = segments.astype(np.float32)
+    dx = segs[:, 2] - segs[:, 0]
+    dy = segs[:, 3] - segs[:, 1]
+    angles = np.degrees(np.arctan2(dy, dx))  # [-180, 180]
+    angles = np.mod(angles, 180.0)           # [0, 180)
+    return angles.astype(np.float32)
+
+def knn_distances(points: np.ndarray, k: int = 5) -> np.ndarray:
+    """
+    For each point, compute distances to its k nearest *other* points.
+    points: (N, 2)
+    returns: (N, k) distances sorted ascending for each point.
+             If N <= 1 -> empty array.
+             If N-1 < k -> we only return up to N-1 neighbors.
+    """
+    if points is None or len(points) <= 1:
+        return np.zeros((0, 0), dtype=np.float32)
+
+    pts = points.astype(np.float32)
+    # pairwise distances via broadcasting
+    diff = pts[:, None, :] - pts[None, :, :]      # (N, N, 2)
+    dists = np.linalg.norm(diff, axis=-1)         # (N, N)
+    # ignore self-distance
+    np.fill_diagonal(dists, np.inf)
+
+    # sort distances along axis=1 and take first k
+    k_eff = min(k, dists.shape[1] - 1)            # can't have more than N-1 neighbors
+    dists_sorted = np.sort(dists, axis=1)[:, :k_eff]   # (N, k_eff)
+    return dists_sorted.astype(np.float32)
+
+def nearest_neighbor_distances(points: np.ndarray) -> np.ndarray:
+    """
+    For each point, compute distance to its nearest *other* point.
+    points: (N, 2)
+    returns: (N,) distances. If N <= 1, returns empty array.
+    """
+    if points is None or len(points) <= 1:
+        return np.zeros((0,), dtype=np.float32)
+
+    pts = points.astype(np.float32)
+    # pairwise distances via broadcasting
+    diff = pts[:, None, :] - pts[None, :, :]  # (N, N, 2)
+    dists = np.linalg.norm(diff, axis=-1)     # (N, N)
+    # ignore self-distance
+    np.fill_diagonal(dists, np.inf)
+    nn = np.min(dists, axis=1)
+    return nn.astype(np.float32)
+
+def save_histogram(data: np.ndarray,
+                   bins: int,
+                   title: str,
+                   xlabel: str,
+                   out_path: str):
+    """
+    Save a 1D histogram of 'data' to out_path as PNG.
+    If data is empty, it creates an empty plot with a note.
+    """
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+    plt.figure()
+    if data is not None and len(data) > 0:
+        plt.hist(data, bins=bins)
+    else:
+        plt.text(0.5, 0.5, "No data", ha="center", va="center")
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel("Count")
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+
+def compute_mask_stats(mask_u8: np.ndarray) -> dict:
+    """
+    Compute simple mask stats:
+      - H, W
+      - area (pixels)
+      - area_fraction (over image)
+      - perimeter (px, approx)
+      - area_perimeter_ratio
+    """
+    H, W = mask_u8.shape[:2]
+    area = int(np.count_nonzero(mask_u8 > 0))
+    area_fraction = float(area) / float(H * W) if H * W > 0 else 0.0
+    perim = approx_perimeter(mask_u8)
+    if perim <= 1e-6:
+        apr = 0.0
+    else:
+        apr = float(area) / float(perim)
+    return {
+        "H": H,
+        "W": W,
+        "area_px": area,
+        "area_fraction": area_fraction,
+        "perimeter_px": float(perim),
+        "area_perimeter_ratio": apr,
+    }
+    
+def compute_and_save_metrics(
+    contour_segs: np.ndarray,
+    noise_segs: np.ndarray,
+    mask_u8: np.ndarray,
+    frag_canvas: np.ndarray,
+    out_dir: str,
+    stem: str,
+):
+    """
+    Compute:
+      - global densities (segments per 10k px) for outline & noise
+      - nearest-neighbor distance distributions
+      - orientation histograms
+      - mask stats (area, perimeter, area:perimeter)
+      - coverage of fragments (fraction of pixels hit by any segment)
+
+    Save:
+      - JSON with numeric stats: <stem>_metrics.json
+      - histograms as PNGs in <out_dir>/metrics/<stem>_*.png
+    """
+    H, W = mask_u8.shape[:2]
+    img_area = float(H * W) if H > 0 and W > 0 else 1.0
+
+    # midpoints & lengths
+    mp_outline = segment_midpoints(contour_segs)
+    mp_noise   = segment_midpoints(noise_segs)
+
+    len_outline = segment_lengths(contour_segs)
+    len_noise   = segment_lengths(noise_segs)
+
+    # orientations
+    ori_outline = segment_orientations_deg(contour_segs)
+    ori_noise   = segment_orientations_deg(noise_segs)
+
+    # nearest-neighbor distances (spacing)
+    nn_outline = nearest_neighbor_distances(mp_outline)
+    nn_noise   = nearest_neighbor_distances(mp_noise)
+
+    # densities: segments per 10k pixels
+    outline_density = (len(contour_segs) / img_area) * 10000.0
+    noise_density   = (len(noise_segs) / img_area) * 10000.0
+
+    # mask stats
+    mask_stats = compute_mask_stats(mask_u8)
+
+    # coverage by fragments: where frag_canvas is nonzero
+    if frag_canvas.ndim == 3:
+        frag_gray = cv2.cvtColor(frag_canvas, cv2.COLOR_BGR2GRAY)
+    else:
+        frag_gray = frag_canvas.copy()
+    frag_cov_px = int(np.count_nonzero(frag_gray > 0))
+    frag_cov_fraction = float(frag_cov_px) / img_area
+
+    # coverage inside vs outside mask
+    mask_bool = mask_u8 > 0
+    inside_cov  = int(np.count_nonzero((frag_gray > 0) & mask_bool))
+    outside_cov = int(np.count_nonzero((frag_gray > 0) & (~mask_bool)))
+    inside_cov_fraction  = float(inside_cov) / img_area
+    outside_cov_fraction = float(outside_cov) / img_area
+
+    # prepare metrics directory
+    metrics_dir = os.path.join(out_dir, "metrics")
+    os.makedirs(metrics_dir, exist_ok=True)
+
+    # ---- save numeric metrics as JSON ----
+    metrics = {
+        "image_size": {"H": H, "W": W, "area_px": img_area},
+        "mask_stats": mask_stats,
+        "outline": {
+            "num_segments": int(len(contour_segs)),
+            "density_per_10k_px": outline_density,
+            "mean_length": float(len_outline.mean()) if len(len_outline) else 0.0,
+            "median_length": float(np.median(len_outline)) if len(len_outline) else 0.0,
+            "mean_nn_dist": float(nn_outline.mean()) if len(nn_outline) else 0.0,
+            "median_nn_dist": float(np.median(nn_outline)) if len(nn_outline) else 0.0,
+        },
+        "noise": {
+            "num_segments": int(len(noise_segs)),
+            "density_per_10k_px": noise_density,
+            "mean_length": float(len_noise.mean()) if len(len_noise) else 0.0,
+            "median_length": float(np.median(len_noise)) if len(len_noise) else 0.0,
+            "mean_nn_dist": float(nn_noise.mean()) if len(nn_noise) else 0.0,
+            "median_nn_dist": float(np.median(nn_noise)) if len(nn_noise) else 0.0,
+        },
+        "coverage": {
+            "total_cov_px": frag_cov_px,
+            "total_cov_fraction": frag_cov_fraction,
+            "inside_cov_px": inside_cov,
+            "inside_cov_fraction": inside_cov_fraction,
+            "outside_cov_px": outside_cov,
+            "outside_cov_fraction": outside_cov_fraction,
+        },
+    }
+
+    json_path = os.path.join(metrics_dir, f"{stem}_metrics.json")
+    with open(json_path, "w") as f:
+        json.dump(metrics, f, indent=2)
+
+    # ---- save histograms ----
+    # orientations
+    save_histogram(
+        ori_outline,
+        bins=18,
+        title="Outline orientation (deg)",
+        xlabel="degrees [0, 180)",
+        out_path=os.path.join(metrics_dir, f"{stem}_outline_orientation_hist.png"),
+    )
+    save_histogram(
+        ori_noise,
+        bins=18,
+        title="Noise orientation (deg)",
+        xlabel="degrees [0, 180)",
+        out_path=os.path.join(metrics_dir, f"{stem}_noise_orientation_hist.png"),
+    )
+
+    # nearest-neighbor distances
+    save_histogram(
+        nn_outline,
+        bins=20,
+        title="Outline NN distances (px)",
+        xlabel="pixels",
+        out_path=os.path.join(metrics_dir, f"{stem}_outline_nn_hist.png"),
+    )
+    save_histogram(
+        nn_noise,
+        bins=20,
+        title="Noise NN distances (px)",
+        xlabel="pixels",
+        out_path=os.path.join(metrics_dir, f"{stem}_noise_nn_hist.png"),
+    )
+
+    # lengths
+    save_histogram(
+        len_outline,
+        bins=20,
+        title="Outline segment lengths (px)",
+        xlabel="pixels",
+        out_path=os.path.join(metrics_dir, f"{stem}_outline_length_hist.png"),
+    )
+    save_histogram(
+        len_noise,
+        bins=20,
+        title="Noise segment lengths (px)",
+        xlabel="pixels",
+        out_path=os.path.join(metrics_dir, f"{stem}_noise_length_hist.png"),
+    )
 
 # ==========================================================
 # --------- Contour → segments (scan & random) -------------
@@ -510,6 +791,17 @@ def fragment_one(
     t1 = time.perf_counter()
     print(f"saved: {out_frag} and {out_panel}  | "
           f"outline={outline_mode}  | time={t1 - t0:.3f}s")
+
+    # --- metrics: density, orientation, spacing, coverage ---
+    compute_and_save_metrics(
+        contour_segs=contour_segs,
+        noise_segs=noise_segs,
+        mask_u8=mask,
+        frag_canvas=frag,
+        out_dir=out_dir,
+        stem=name,
+    )
+
 
 
 # ==========================================================
