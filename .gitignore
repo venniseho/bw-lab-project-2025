@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+venv/
+.env/
+.env*/
+.venv/
+
+# Model checkpoints / weights
+checkpoints/
+*.pth
+*.ckpt
+*.pt
+*.onnx
+
+# Datasets (large, external)
+
+COCO/
+datasets/
+data/
+
+# Outputs / results
+outputs/
+results/
+runs/
+logs/
+*.jtl
+*.log
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Temporary / cache
+.cache/
+tmp/
