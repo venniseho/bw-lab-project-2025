@@ -42,9 +42,22 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 
-# ==========================================================
+
+# -------------------- Constants -----------------------
+DASH_LEN_MIN = 4
+DASH_LEN_MAX = 12
+
+# Histogram configuration: fixed edges across all images
+HIST_B_LEN = 20
+HIST_B_ORI = 18
+HIST_B_NN  = 20
+
+HIST_LEN_RANGE = (0.0, float(DASH_LEN_MAX))
+HIST_ORI_RANGE = (0.0, 180.0)
+HIST_NN_RANGE  = (0.0, float(3.0 * DASH_LEN_MAX))
+
+
 # -------------------- Helper functions --------------------
-# ==========================================================
 
 def ensure_binary(mask: np.ndarray) -> np.ndarray:
     """
@@ -165,13 +178,9 @@ def approx_perimeter(mask_u8: np.ndarray) -> float:
     return float(cv2.arcLength(cnt, closed=True))
 
 
-def choose_edge_and_gap(
-    perimeter_px: float,
-    target_frag_per_100px: float = 6,
-    min_edge: int = 4,
-    max_edge: int = 12,
-    gap_factor: float = 0.35,
-):
+def choose_edge_and_gap(perimeter_px: float, target_frag_per_100px: float = 6,
+                        min_edge: int = DASH_LEN_MIN, max_edge: int = DASH_LEN_MAX,
+                        gap_factor: float = 0.35):
     """
     Choose dash length edge_len based on a target number of dashes per 100 pixels of perimeter.
 
@@ -179,14 +188,12 @@ def choose_edge_and_gap(
       - edge_len controls dash length
       - gap_factor controls typical gap as a fraction of edge_len (NOT grid)
     """
-    desired = int(round(100.0 / max(1, target_frag_per_100px)))  # px per dash
+    desired = int(round(100.0 / max(1, target_frag_per_100px)))
     edge_len = int(np.clip(desired, min_edge, max_edge))
-    return edge_len, gap_factor
+    return edge_len, gap_factor 
 
 
-# ==========================================================
 # -------------------- Measures / stats --------------------
-# ==========================================================
 
 def segment_midpoints(segments: np.ndarray) -> np.ndarray:
     """Return (N,2) midpoints for segments shaped (N,4)."""
@@ -238,6 +245,26 @@ def nearest_neighbor_distances(points: np.ndarray) -> np.ndarray:
     nn = np.min(dists, axis=1)
     return nn.astype(np.float32)
 
+def histogram_counts(data: np.ndarray, bins: int, range_: tuple[float, float] | None = None):
+    """
+    Return histogram counts + bin edges for chi-square comparison.
+    We keep bins/edges identical for outline vs noise by using the same binning config.
+    """
+    if data is None:
+        data = np.zeros((0,), dtype=np.float32)
+    data = np.asarray(data).astype(np.float32)
+
+    if len(data) == 0:
+        # empty -> all zeros counts; still return edges
+        if range_ is None:
+            # arbitrary default range
+            range_ = (0.0, 1.0)
+        counts = np.zeros((bins,), dtype=np.int64)
+        edges = np.linspace(range_[0], range_[1], bins + 1, dtype=np.float32)
+        return counts, edges
+
+    counts, edges = np.histogram(data, bins=bins, range=range_)
+    return counts.astype(np.int64), edges.astype(np.float32)
 
 def save_histogram(data: np.ndarray, bins: int, title: str, xlabel: str, out_path: Path):
     """Save a simple histogram PNG for quick debugging/QA."""
@@ -282,17 +309,56 @@ def compute_and_save_metrics(
     out_dir: Path,
     stem: str,
     metrics_dir: Optional[Path] = None,
+    edge_len_used: Optional[float] = None,
 ):
     """
-    Compute and save debug/QA metrics.
+    Compute and save QA metrics to verify "no easy local cues".
 
-    IMPORTANT:
-      These are for *debugging & analysis*, not for training inputs.
-      Keep these separate from the stimulus images you feed into models.
+    Computations:
+    ---------
+    Outline vs noise:
+      - #segments, density per 10k px
+      - dash length distribution
+      - orientation distribution (deg mod 180)
+      - midpoint spacing distribution (nearest-neighbor distances)
+
+    Coverage:
+      - fraction of pixels hit by any dash
+      - inside-vs-outside coverage (relative to GT mask)
+
+    Outputs
+    -------
+    Writes to metrics_dir (default: out_dir/"metrics"):
+      - <stem>_metrics.json  (includes histogram edges + counts for p-value tests)
+      - <stem>_outline_*_hist.png and <stem>_noise_*_hist.png (visual QA)
     """
+    # -------------------------
+    # Fixed histogram settings
+    # -------------------------
+    # These MUST match the constraints used for generation (choose_edge_and_gap / edge_len range).
+    # If you used DASH_LEN_MAX = 12 in your generator, keep it consistent here.
+    DASH_LEN_MAX = 12.0
+
+    HIST_B_LEN = 20
+    HIST_B_ORI = 18
+    HIST_B_NN = 20
+
+    HIST_LEN_RANGE = (0.0, DASH_LEN_MAX)             # dash lengths
+    HIST_ORI_RANGE = (0.0, 180.0)                    # orientations modulo 180
+    HIST_NN_RANGE = (0.0, 3.0 * DASH_LEN_MAX)        # midpoint spacing (heuristic upper bound)
+
+    # -------------------------
+    # Setup / basic quantities
+    # -------------------------
     H, W = mask_u8.shape[:2]
     img_area = float(H * W) if H > 0 and W > 0 else 1.0
 
+    metrics_dir = Path(metrics_dir) if metrics_dir is not None else Path(out_dir) / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+
+    # -------------------------
+    # Segment-wise features
+    # -------------------------
     mp_outline = segment_midpoints(contour_segs)
     mp_noise = segment_midpoints(noise_segs)
 
@@ -310,8 +376,14 @@ def compute_and_save_metrics(
 
     mask_stats = compute_mask_stats(mask_u8)
 
-    # coverage: how many pixels got hit by any dash (outline+noise)
-    frag_gray = cv2.cvtColor(frag_canvas, cv2.COLOR_BGR2GRAY) if frag_canvas.ndim == 3 else frag_canvas.copy()
+    # -------------------------
+    # Coverage (stimulus pixels)
+    # -------------------------
+    if frag_canvas.ndim == 3:
+        frag_gray = cv2.cvtColor(frag_canvas, cv2.COLOR_BGR2GRAY)
+    else:
+        frag_gray = frag_canvas.copy()
+
     frag_cov_px = int(np.count_nonzero(frag_gray > 0))
     frag_cov_fraction = float(frag_cov_px) / img_area
 
@@ -321,15 +393,35 @@ def compute_and_save_metrics(
     inside_cov_fraction = float(inside_cov) / img_area
     outside_cov_fraction = float(outside_cov) / img_area
 
-    metrics_dir = Path(metrics_dir) if metrics_dir is not None else Path(out_dir) / "metrics"
-    metrics_dir.mkdir(parents=True, exist_ok=True)
+    # -------------------------
+    # Histogram counts for tests
+    # -------------------------
+    len_outline_counts, len_edges = histogram_counts(len_outline, bins=HIST_B_LEN, range_=HIST_LEN_RANGE)
+    len_noise_counts, _ = histogram_counts(len_noise, bins=HIST_B_LEN, range_=HIST_LEN_RANGE)
 
+    ori_outline_counts, ori_edges = histogram_counts(ori_outline, bins=HIST_B_ORI, range_=HIST_ORI_RANGE)
+    ori_noise_counts, _ = histogram_counts(ori_noise, bins=HIST_B_ORI, range_=HIST_ORI_RANGE)
+
+    nn_outline_counts, nn_edges = histogram_counts(nn_outline, bins=HIST_B_NN, range_=HIST_NN_RANGE)
+    nn_noise_counts, _ = histogram_counts(nn_noise, bins=HIST_B_NN, range_=HIST_NN_RANGE)
+
+    # -------------------------
+    # Main JSON payload
+    # -------------------------
     metrics = {
         "image_size": {"H": H, "W": W, "area_px": img_area},
         "mask_stats": mask_stats,
+        "params": {
+            # Store what was used (helpful for debugging inconsistencies)
+            "edge_len_used": float(edge_len_used) if edge_len_used is not None else None,
+            # Fixed histogram config (critical for pooling)
+            "hist_bins": {"length": int(HIST_B_LEN), "orientation_deg": int(HIST_B_ORI), "nn_distance": int(HIST_B_NN)},
+            "hist_ranges": {"length": list(HIST_LEN_RANGE), "orientation_deg": list(HIST_ORI_RANGE), "nn_distance": list(HIST_NN_RANGE)},
+            "dash_len_max_assumed": float(DASH_LEN_MAX),
+        },
         "outline": {
             "num_segments": int(len(contour_segs)),
-            "density_per_10k_px": outline_density,
+            "density_per_10k_px": float(outline_density),
             "mean_length": float(len_outline.mean()) if len(len_outline) else 0.0,
             "median_length": float(np.median(len_outline)) if len(len_outline) else 0.0,
             "mean_nn_dist": float(nn_outline.mean()) if len(nn_outline) else 0.0,
@@ -337,19 +429,40 @@ def compute_and_save_metrics(
         },
         "noise": {
             "num_segments": int(len(noise_segs)),
-            "density_per_10k_px": noise_density,
+            "density_per_10k_px": float(noise_density),
             "mean_length": float(len_noise.mean()) if len(len_noise) else 0.0,
             "median_length": float(np.median(len_noise)) if len(len_noise) else 0.0,
             "mean_nn_dist": float(nn_noise.mean()) if len(nn_noise) else 0.0,
             "median_nn_dist": float(np.median(nn_noise)) if len(nn_noise) else 0.0,
         },
         "coverage": {
-            "total_cov_px": frag_cov_px,
-            "total_cov_fraction": frag_cov_fraction,
-            "inside_cov_px": inside_cov,
-            "inside_cov_fraction": inside_cov_fraction,
-            "outside_cov_px": outside_cov,
-            "outside_cov_fraction": outside_cov_fraction,
+            "total_cov_px": int(frag_cov_px),
+            "total_cov_fraction": float(frag_cov_fraction),
+            "inside_cov_px": int(inside_cov),
+            "inside_cov_fraction": float(inside_cov_fraction),
+            "outside_cov_px": int(outside_cov),
+            "outside_cov_fraction": float(outside_cov_fraction),
+        },
+        # Histogram edges + counts needed for chi-square p-value tests
+        "hists": {
+            "length": {
+                "bins": int(HIST_B_LEN),
+                "edges": len_edges.tolist(),
+                "outline_counts": len_outline_counts.tolist(),
+                "noise_counts": len_noise_counts.tolist(),
+            },
+            "orientation_deg": {
+                "bins": int(HIST_B_ORI),
+                "edges": ori_edges.tolist(),
+                "outline_counts": ori_outline_counts.tolist(),
+                "noise_counts": ori_noise_counts.tolist(),
+            },
+            "nn_distance": {
+                "bins": int(HIST_B_NN),
+                "edges": nn_edges.tolist(),
+                "outline_counts": nn_outline_counts.tolist(),
+                "noise_counts": nn_noise_counts.tolist(),
+            },
         },
     }
 
@@ -357,20 +470,50 @@ def compute_and_save_metrics(
     with open(json_path, "w") as f:
         json.dump(metrics, f, indent=2)
 
-    # Histograms for distribution-matching debugging
-    save_histogram(ori_outline, bins=18, title="Outline orientation (deg)", xlabel="degrees [0,180)", out_path=metrics_dir / f"{stem}_outline_orientation_hist.png")
-    save_histogram(ori_noise, bins=18, title="Noise orientation (deg)", xlabel="degrees [0,180)", out_path=metrics_dir / f"{stem}_noise_orientation_hist.png")
+    # -------------------------
+    # Visual QA histograms
+    # -------------------------
+    save_histogram(
+        ori_outline, bins=HIST_B_ORI,
+        title="Outline orientation (deg, mod 180)",
+        xlabel="degrees [0,180)",
+        out_path=metrics_dir / f"{stem}_outline_orientation_hist.png",
+    )
+    save_histogram(
+        ori_noise, bins=HIST_B_ORI,
+        title="Noise orientation (deg, mod 180)",
+        xlabel="degrees [0,180)",
+        out_path=metrics_dir / f"{stem}_noise_orientation_hist.png",
+    )
 
-    save_histogram(nn_outline, bins=20, title="Outline NN distances (px)", xlabel="pixels", out_path=metrics_dir / f"{stem}_outline_nn_hist.png")
-    save_histogram(nn_noise, bins=20, title="Noise NN distances (px)", xlabel="pixels", out_path=metrics_dir / f"{stem}_noise_nn_hist.png")
+    save_histogram(
+        nn_outline, bins=HIST_B_NN,
+        title="Outline NN distances (midpoints, px)",
+        xlabel="pixels",
+        out_path=metrics_dir / f"{stem}_outline_nn_hist.png",
+    )
+    save_histogram(
+        nn_noise, bins=HIST_B_NN,
+        title="Noise NN distances (midpoints, px)",
+        xlabel="pixels",
+        out_path=metrics_dir / f"{stem}_noise_nn_hist.png",
+    )
 
-    save_histogram(len_outline, bins=20, title="Outline segment lengths (px)", xlabel="pixels", out_path=metrics_dir / f"{stem}_outline_length_hist.png")
-    save_histogram(len_noise, bins=20, title="Noise segment lengths (px)", xlabel="pixels", out_path=metrics_dir / f"{stem}_noise_length_hist.png")
+    save_histogram(
+        len_outline, bins=HIST_B_LEN,
+        title="Outline segment lengths (px)",
+        xlabel="pixels",
+        out_path=metrics_dir / f"{stem}_outline_length_hist.png",
+    )
+    save_histogram(
+        len_noise, bins=HIST_B_LEN,
+        title="Noise segment lengths (px)",
+        xlabel="pixels",
+        out_path=metrics_dir / f"{stem}_noise_length_hist.png",
+    )
 
 
-# ==========================================================
 # --------- Contour -> segments (scan & random) -------------
-# ==========================================================
 
 def contour_to_segments(
     pts: np.ndarray,
@@ -502,9 +645,7 @@ def contour_to_segments_random(
     return np.array(segs, dtype=np.float32), occ
 
 
-# ==========================================================
 # --------------- Background noise generators --------------
-# ==========================================================
 
 def sample_angles_from_segments(segments: np.ndarray, n: int, rng: np.random.Generator) -> np.ndarray:
     """
@@ -683,9 +824,7 @@ def panel3(orig: np.ndarray, frag: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return np.hstack([orig, frag, m3])
 
 
-# ==========================================================
 # -------------------- Main pipeline -----------------------
-# ==========================================================
 
 def _load_image_and_mask(image_path: str, mask_path: str) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -875,29 +1014,23 @@ def fragment_one(
     outside_noise_count=None,
     inside_noise_len=None,
     outside_noise_len=None,
-    # New: allow splitting outputs to prevent cue leakage
+    # Output discipline: keep stimuli clean (no orig/mask panels in the stimuli folder)
     stimuli_subdir: str = "fragments",
     debug_subdir: str = "debug",
 ):
     """
-    Core entry point: one image + one mask.
-
-    Output discipline (IMPORTANT):
-      - "stimulus" image (outline+noise only) goes in out_dir/<stimuli_subdir>
-      - debug images (outline-only + panel + metrics) can go elsewhere
-
-    This helps ensure you don't accidentally train/evaluate on debug panels.
+    Entry point: one image + one mask -> stimulus + debug.
     """
     t0 = time.perf_counter()
 
     out_root = Path(out_dir)
     out_root.mkdir(parents=True, exist_ok=True)
 
-    # Stimuli directory: only what humans/models should see
+    # Safe stimuli directory (ONLY stimulus images)
     stimuli_dir = out_root / stimuli_subdir
     stimuli_dir.mkdir(parents=True, exist_ok=True)
 
-    # Debug directory: outline-only, panels, etc. (do not feed to models)
+    # Debug directory (NEVER use for training/testing)
     debug_dir = out_root / debug_subdir
     outlines_dir = debug_dir / "outlines"
     panels_dir = debug_dir / "panels"
@@ -908,52 +1041,57 @@ def fragment_one(
 
     name = output_stem or Path(image_path).stem
 
+    # Load and binarize mask; resize mask to image size
     img, mask = _load_image_and_mask(image_path, mask_path)
 
     # If edge_len not specified, choose based on mask perimeter
+    # NOTE: choose_edge_and_gap should cap edge_len to your experiment limits
     if edge_len is None or edge_len < 0:
         perim = approx_perimeter(mask)
         edge_len, gap_factor = choose_edge_and_gap(
             perimeter_px=perim,
             target_frag_per_100px=target_frag_per_100px,
-            min_edge=10,
-            max_edge=24,
+            # IMPORTANT: keep these consistent with compute_and_save_metrics() ranges
+            min_edge=4,
+            max_edge=12,
             gap_factor=gap_factor,
         )
 
-    # 1) outline segments along the object boundary
+    # 1) Generate outline segments along the object boundary
     contour_segs, occ = _generate_outline_segments(
         mask=mask,
-        edge_len=edge_len,
-        gap_factor=gap_factor,
-        jitter_deg=jitter_deg,
-        thickness=thickness,
-        sep_pad=sep_pad,
-        outline_mode=outline_mode,
+        edge_len=int(edge_len),
+        gap_factor=float(gap_factor),
+        jitter_deg=int(jitter_deg),
+        thickness=int(thickness),
+        sep_pad=int(sep_pad),
+        outline_mode=str(outline_mode),
         max_outline_segments=max_outline_segments,
     )
 
-    # We render stimulus on a black canvas.
-    # NOTE: we intentionally do NOT use the original image in the stimulus.
+    # Render stimulus on a black canvas.
+    # This guarantees no leakage of original texture/background cues.
     stimulus = np.zeros_like(img)
 
-    # Draw outline dashes (white)
-    draw_segments(stimulus, contour_segs, color=(255, 255, 255), thickness=thickness)
+    # Draw outline dashes FIRST (white)
+    draw_segments(stimulus, contour_segs, color=(255, 255, 255), thickness=int(thickness))
 
-    # Save outline-only debug view
+    # Save outline-only debug view (useful for QA)
     cv2.imwrite(str(outlines_dir / f"{name}_outline.png"), stimulus)
 
-    # 2) background noise: match local stats to outline (length/orientation/thickness/color)
+    # 2) Generate noise segments that match outline local stats
+    # Key idea: sample noise orientations from outline segment orientations
+    # and use the SAME dash length (edge_len).
     noise_segs, occ = _generate_noise_segments(
         mask=mask,
         occ=occ,
-        edge_len=edge_len,
-        thickness=thickness,
-        sep_pad=sep_pad,
-        noise_mode=noise_mode,
-        noise_per_cell=noise_per_cell,
-        grid=grid,
-        noise_count=noise_count,
+        edge_len=int(edge_len),
+        thickness=int(thickness),
+        sep_pad=int(sep_pad),
+        noise_mode=str(noise_mode),
+        noise_per_cell=int(noise_per_cell),
+        grid=int(grid),
+        noise_count=int(noise_count),
         inside_noise_count=inside_noise_count,
         outside_noise_count=outside_noise_count,
         inside_noise_len=inside_noise_len,
@@ -962,13 +1100,13 @@ def fragment_one(
     )
 
     # Draw noise with IDENTICAL appearance (same color + thickness)
-    draw_segments(stimulus, noise_segs, color=(255, 255, 255), thickness=thickness)
+    draw_segments(stimulus, noise_segs, color=(255, 255, 255), thickness=int(thickness))
 
-    # Save the final stimulus image (this is what you should feed into models/humans)
+    # Save final stimulus (THIS is what you use for humans/models)
     out_stimulus = stimuli_dir / f"{name}_fragmented.png"
     cv2.imwrite(str(out_stimulus), stimulus)
 
-    # Debug panel (orig | stimulus | mask) — never use as model input
+    # Debug panel: orig | stimulus | mask (never feed to models)
     out_panel = panels_dir / f"{name}_panel.png"
     cv2.imwrite(str(out_panel), panel3(img, stimulus, mask))
 
@@ -987,12 +1125,12 @@ def fragment_one(
         out_dir=debug_dir,
         stem=name,
         metrics_dir=metrics_dir,
+        edge_len_used=float(edge_len),
     )
 
 
-# ==========================================================
+
 # ----------------------- Script entry ---------------------
-# ==========================================================
 
 def main():
     """
@@ -1019,7 +1157,7 @@ def main():
         img_p = images_dir / fname
         msk_p = masks_dir / f"{stem}_mask.png"
         if not msk_p.exists():
-            print(f"⚠ skip {fname} — no mask found at {msk_p}")
+            print(f"skip {fname} — no mask found at {msk_p}")
             continue
 
         fragment_one(
