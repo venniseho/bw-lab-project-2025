@@ -168,8 +168,8 @@ def approx_perimeter(mask_u8: np.ndarray) -> float:
 def choose_edge_and_gap(
     perimeter_px: float,
     target_frag_per_100px: float = 6,
-    min_edge: int = 10,
-    max_edge: int = 24,
+    min_edge: int = 4,
+    max_edge: int = 12,
     gap_factor: float = 0.35,
 ):
     """
