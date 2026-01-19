@@ -13,27 +13,27 @@
     "area_perimeter_ratio": 17.45193383837784
   },
   "outline": {
-    "num_segments": 32,
-    "density_per_10k_px": 1.3888888888888888,
-    "mean_length": 10.651077270507812,
-    "median_length": 11.179769515991211,
-    "mean_nn_dist": 14.521597862243652,
-    "median_nn_dist": 13.774253845214844
+    "num_segments": 33,
+    "density_per_10k_px": 1.4322916666666667,
+    "mean_length": 10.661309242248535,
+    "median_length": 11.172183990478516,
+    "mean_nn_dist": 14.095797538757324,
+    "median_nn_dist": 14.243877410888672
   },
   "noise": {
-    "num_segments": 399,
-    "density_per_10k_px": 17.317708333333336,
-    "mean_length": 9.5513334274292,
-    "median_length": 9.486832618713379,
-    "mean_nn_dist": 14.136234283447266,
-    "median_nn_dist": 13.416407585144043
+    "num_segments": 400,
+    "density_per_10k_px": 17.36111111111111,
+    "mean_length": 9.656607627868652,
+    "median_length": 9.899495124816895,
+    "mean_nn_dist": 14.133313179016113,
+    "median_nn_dist": 13.601470947265625
   },
   "coverage": {
-    "total_cov_px": 4293,
-    "total_cov_fraction": 0.0186328125,
-    "inside_cov_px": 436,
-    "inside_cov_fraction": 0.0018923611111111112,
-    "outside_cov_px": 3857,
-    "outside_cov_fraction": 0.01674045138888889
+    "total_cov_px": 4205,
+    "total_cov_fraction": 0.018250868055555557,
+    "inside_cov_px": 449,
+    "inside_cov_fraction": 0.0019487847222222222,
+    "outside_cov_px": 3756,
+    "outside_cov_fraction": 0.01630208333333333
   }
 }

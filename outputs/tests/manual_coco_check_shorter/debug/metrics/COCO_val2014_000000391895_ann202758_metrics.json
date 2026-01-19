@@ -15,25 +15,25 @@
   "outline": {
     "num_segments": 40,
     "density_per_10k_px": 1.7361111111111112,
-    "mean_length": 10.814905166625977,
-    "median_length": 11.110427856445312,
-    "mean_nn_dist": 14.800775527954102,
-    "median_nn_dist": 14.03898811340332
+    "mean_length": 10.824758529663086,
+    "median_length": 11.173564910888672,
+    "mean_nn_dist": 14.18237018585205,
+    "median_nn_dist": 14.620024681091309
   },
   "noise": {
     "num_segments": 400,
     "density_per_10k_px": 17.36111111111111,
-    "mean_length": 9.522321701049805,
+    "mean_length": 9.474230766296387,
     "median_length": 9.486832618713379,
-    "mean_nn_dist": 13.692375183105469,
-    "median_nn_dist": 12.806248664855957
+    "mean_nn_dist": 14.000614166259766,
+    "median_nn_dist": 13.03840446472168
   },
   "coverage": {
-    "total_cov_px": 4293,
-    "total_cov_fraction": 0.0186328125,
-    "inside_cov_px": 519,
-    "inside_cov_fraction": 0.0022526041666666666,
-    "outside_cov_px": 3774,
-    "outside_cov_fraction": 0.016380208333333333
+    "total_cov_px": 4307,
+    "total_cov_fraction": 0.01869357638888889,
+    "inside_cov_px": 457,
+    "inside_cov_fraction": 0.0019835069444444444,
+    "outside_cov_px": 3850,
+    "outside_cov_fraction": 0.016710069444444444
   }
 }
