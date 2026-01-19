@@ -3,13 +3,32 @@ mask_fragmenter_clean.py
 --------------------------------------------------------------
 Generate fragmented-contour stimuli from real object masks.
 
-For each image + mask pair:
-  • Extract the object's contour
-  • Convert it into short line segments with gaps
-  • Add background "noise" line segments
-  • Save the fragmented result + comparison panel
+Goal (your experiment constraints)
+----------------------------------
+We want *no easy local cues* that could let a segmentation model cheat:
+  - Outline dashes and background dashes must look identical locally:
+      * same color/intensity
+      * same thickness
+      * same dash length distribution
+      * similar orientation distribution (VERY important)
+      * similar spacing / density (as much as feasible)
 
-Requires: numpy, opencv-python
+The *only* thing distinguishing "object" is the global arrangement:
+  - some dashes lie along a coherent boundary (Gestalt closure cue)
+
+What this file does
+-------------------
+Given an image + a binary mask (object=white, bg=black):
+  1) Extract the outer contour of the mask (largest component)
+  2) Convert that contour into short line segments with gaps (dashed outline)
+  3) Generate background "noise" segments that match local statistics
+  4) Render and save:
+      - outline-only image
+      - final stimulus image (outline + noise)
+      - debug panel (orig | stimulus | mask)
+      - metrics JSON + histograms
+
+Requires: numpy, opencv-python, matplotlib (for histogram plots)
 --------------------------------------------------------------
 """
 
@@ -17,7 +36,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Optional 
+from typing import Optional
 
 import cv2
 import matplotlib.pyplot as plt
@@ -29,9 +48,11 @@ import numpy as np
 
 def ensure_binary(mask: np.ndarray) -> np.ndarray:
     """
-    Make a clean binary mask where OBJECT is white (255) and
-    background is black (0). If the initial threshold yields
-    mostly-white image (likely background), auto-invert.
+    Ensure mask is binary uint8 with:
+      object = 255, background = 0.
+
+    We also try to auto-correct "inverted" masks:
+      - if thresholding yields mostly-white, likely background is white → invert.
     """
     if mask.ndim == 3:
         mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
@@ -40,24 +61,33 @@ def ensure_binary(mask: np.ndarray) -> np.ndarray:
     if uniques.size <= 2 and set(uniques.tolist()).issubset({0, 255}):
         return (mask > 0).astype(np.uint8) * 255
 
-    _, mask = cv2.threshold(mask, 0, 255,
-                            cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # Otsu to binarize "soft" masks
+    _, mask = cv2.threshold(mask, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     mask = (mask > 0).astype(np.uint8) * 255
 
+    # If more than half the image is white, it's probably inverted.
     if (mask.mean() / 255.0) > 0.5:
         mask = 255 - mask
+
     return mask
 
 
 def largest_external_contour(mask_u8: np.ndarray):
-    cnts, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL,
-                               cv2.CHAIN_APPROX_NONE)
+    """
+    Find external contours and return the largest one by area.
+    This is what we'll use for the "object boundary" outline.
+    """
+    cnts, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     if not cnts:
         return None
     return max(cnts, key=cv2.contourArea)
 
 
 def resample_polyline(poly: np.ndarray, step_px: int = 3) -> np.ndarray:
+    """
+    Resample a polyline (contour) to roughly equally spaced points.
+    This stabilizes dash spacing and reduces sensitivity to contour sampling density.
+    """
     pts = poly.reshape(-1, 2).astype(np.float32)
     if len(pts) < 2:
         return pts
@@ -78,6 +108,7 @@ def resample_polyline(poly: np.ndarray, step_px: int = 3) -> np.ndarray:
         r = (t - s[j]) / max(1e-6, (s[j + 1] - s[j]))
         p = (1 - r) * pts[j] + r * pts[j + 1]
         out.append(p)
+
     return np.array(out, dtype=np.float32)
 
 
@@ -90,30 +121,44 @@ def rasterize_line_mask(
     y2: float,
     thickness: int = 1,
 ) -> np.ndarray:
+    """
+    Create a binary image for a single segment (used for overlap/collision checking).
+    """
     m = np.zeros((h, w), np.uint8)
     cv2.line(m, (int(x1), int(y1)), (int(x2), int(y2)), 255, thickness)
     return m
 
 
 def mark_occupied(occ: np.ndarray, seg_mask: np.ndarray, pad: int = 0) -> np.ndarray:
+    """
+    Update an occupancy mask with the newly drawn segment.
+    pad > 0 dilates the segment before marking occupied (enforces minimum spacing).
+    """
     if pad > 0:
-        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
-                                      (2 * pad + 1, 2 * pad + 1))
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * pad + 1, 2 * pad + 1))
         seg_mask = cv2.dilate(seg_mask, k)
+
     occ = (occ > 0).astype(np.uint8, copy=False)
     seg = (seg_mask > 0).astype(np.uint8, copy=False)
     return np.maximum(occ, seg)
 
 
 def intersects(occ: np.ndarray, seg_mask: np.ndarray, pad: int = 0) -> bool:
+    """
+    Check if this segment overlaps anything already occupied.
+    pad is the same dilation concept as above.
+    """
     if pad > 0:
-        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
-                                      (2 * pad + 1, 2 * pad + 1))
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * pad + 1, 2 * pad + 1))
         seg_mask = cv2.dilate(seg_mask, k)
     return np.any((occ > 0) & (seg_mask > 0))
 
 
 def approx_perimeter(mask_u8: np.ndarray) -> float:
+    """
+    Approximate perimeter length of the largest contour.
+    Used to choose an appropriate dash length if edge_len is not specified.
+    """
     cnt = largest_external_contour(mask_u8)
     if cnt is None:
         return 0.0
@@ -127,18 +172,24 @@ def choose_edge_and_gap(
     max_edge: int = 24,
     gap_factor: float = 0.35,
 ):
-    desired = int(round(100.0 / max(1, target_frag_per_100px)))
+    """
+    Choose dash length edge_len based on a target number of dashes per 100 pixels of perimeter.
+
+    Note:
+      - edge_len controls dash length
+      - gap_factor controls typical gap as a fraction of edge_len (NOT grid)
+    """
+    desired = int(round(100.0 / max(1, target_frag_per_100px)))  # px per dash
     edge_len = int(np.clip(desired, min_edge, max_edge))
     return edge_len, gap_factor
 
+
 # ==========================================================
-# -------------------- Measures --------------------
+# -------------------- Measures / stats --------------------
 # ==========================================================
+
 def segment_midpoints(segments: np.ndarray) -> np.ndarray:
-    """
-    segments: (N, 4) [x1, y1, x2, y2]
-    returns: (N, 2) midpoints
-    """
+    """Return (N,2) midpoints for segments shaped (N,4)."""
     if segments is None or len(segments) == 0:
         return np.zeros((0, 2), dtype=np.float32)
     segs = segments.astype(np.float32)
@@ -148,9 +199,7 @@ def segment_midpoints(segments: np.ndarray) -> np.ndarray:
 
 
 def segment_lengths(segments: np.ndarray) -> np.ndarray:
-    """
-    Euclidean length of each segment.
-    """
+    """Return (N,) lengths for segments shaped (N,4)."""
     if segments is None or len(segments) == 0:
         return np.zeros((0,), dtype=np.float32)
     segs = segments.astype(np.float32)
@@ -162,69 +211,36 @@ def segment_lengths(segments: np.ndarray) -> np.ndarray:
 def segment_orientations_deg(segments: np.ndarray) -> np.ndarray:
     """
     Orientation of each segment in degrees, modulo 180.
-    (So a line and its opposite direction share orientation.)
+    (Line direction is symmetric: theta and theta+180 are same.)
     """
     if segments is None or len(segments) == 0:
         return np.zeros((0,), dtype=np.float32)
     segs = segments.astype(np.float32)
     dx = segs[:, 2] - segs[:, 0]
     dy = segs[:, 3] - segs[:, 1]
-    angles = np.degrees(np.arctan2(dy, dx))  # [-180, 180]
-    angles = np.mod(angles, 180.0)           # [0, 180)
+    angles = np.degrees(np.arctan2(dy, dx))   # [-180, 180]
+    angles = np.mod(angles, 180.0)            # [0, 180)
     return angles.astype(np.float32)
 
-def knn_distances(points: np.ndarray, k: int = 5) -> np.ndarray:
-    """
-    For each point, compute distances to its k nearest *other* points.
-    points: (N, 2)
-    returns: (N, k) distances sorted ascending for each point.
-             If N <= 1 -> empty array.
-             If N-1 < k -> we only return up to N-1 neighbors.
-    """
-    if points is None or len(points) <= 1:
-        return np.zeros((0, 0), dtype=np.float32)
-
-    pts = points.astype(np.float32)
-    # pairwise distances via broadcasting
-    diff = pts[:, None, :] - pts[None, :, :]      # (N, N, 2)
-    dists = np.linalg.norm(diff, axis=-1)         # (N, N)
-    # ignore self-distance
-    np.fill_diagonal(dists, np.inf)
-
-    # sort distances along axis=1 and take first k
-    k_eff = min(k, dists.shape[1] - 1)            # can't have more than N-1 neighbors
-    dists_sorted = np.sort(dists, axis=1)[:, :k_eff]   # (N, k_eff)
-    return dists_sorted.astype(np.float32)
 
 def nearest_neighbor_distances(points: np.ndarray) -> np.ndarray:
     """
     For each point, compute distance to its nearest *other* point.
-    points: (N, 2)
-    returns: (N,) distances. If N <= 1, returns empty array.
+    Used as a proxy for spacing regularity.
     """
     if points is None or len(points) <= 1:
         return np.zeros((0,), dtype=np.float32)
 
     pts = points.astype(np.float32)
-    # pairwise distances via broadcasting
-    diff = pts[:, None, :] - pts[None, :, :]  # (N, N, 2)
-    dists = np.linalg.norm(diff, axis=-1)     # (N, N)
-    # ignore self-distance
+    diff = pts[:, None, :] - pts[None, :, :]
+    dists = np.linalg.norm(diff, axis=-1)
     np.fill_diagonal(dists, np.inf)
     nn = np.min(dists, axis=1)
     return nn.astype(np.float32)
 
-def save_histogram(
-    data: np.ndarray,
-    bins: int,
-    title: str,
-    xlabel: str,
-    out_path: Path,
-):
-    """
-    Save a 1D histogram of 'data' to out_path as PNG.
-    If data is empty, it creates an empty plot with a note.
-    """
+
+def save_histogram(data: np.ndarray, bins: int, title: str, xlabel: str, out_path: Path):
+    """Save a simple histogram PNG for quick debugging/QA."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -240,23 +256,14 @@ def save_histogram(
     plt.savefig(out_path)
     plt.close()
 
+
 def compute_mask_stats(mask_u8: np.ndarray) -> dict:
-    """
-    Compute simple mask stats:
-      - H, W
-      - area (pixels)
-      - area_fraction (over image)
-      - perimeter (px, approx)
-      - area_perimeter_ratio
-    """
+    """Basic shape stats for sanity-checking mask quality."""
     H, W = mask_u8.shape[:2]
     area = int(np.count_nonzero(mask_u8 > 0))
     area_fraction = float(area) / float(H * W) if H * W > 0 else 0.0
     perim = approx_perimeter(mask_u8)
-    if perim <= 1e-6:
-        apr = 0.0
-    else:
-        apr = float(area) / float(perim)
+    apr = float(area) / float(perim) if perim > 1e-6 else 0.0
     return {
         "H": H,
         "W": W,
@@ -265,7 +272,8 @@ def compute_mask_stats(mask_u8: np.ndarray) -> dict:
         "perimeter_px": float(perim),
         "area_perimeter_ratio": apr,
     }
-    
+
+
 def compute_and_save_metrics(
     contour_segs: np.ndarray,
     noise_segs: np.ndarray,
@@ -276,62 +284,46 @@ def compute_and_save_metrics(
     metrics_dir: Optional[Path] = None,
 ):
     """
-    Compute:
-      - global densities (segments per 10k px) for outline & noise
-      - nearest-neighbor distance distributions
-      - orientation histograms
-      - mask stats (area, perimeter, area:perimeter)
-      - coverage of fragments (fraction of pixels hit by any segment)
+    Compute and save debug/QA metrics.
 
-    Save:
-      - JSON with numeric stats: <stem>_metrics.json
-      - histograms as PNGs in <out_dir>/metrics/<stem>_*.png
+    IMPORTANT:
+      These are for *debugging & analysis*, not for training inputs.
+      Keep these separate from the stimulus images you feed into models.
     """
     H, W = mask_u8.shape[:2]
     img_area = float(H * W) if H > 0 and W > 0 else 1.0
 
-    # midpoints & lengths
     mp_outline = segment_midpoints(contour_segs)
-    mp_noise   = segment_midpoints(noise_segs)
+    mp_noise = segment_midpoints(noise_segs)
 
     len_outline = segment_lengths(contour_segs)
-    len_noise   = segment_lengths(noise_segs)
+    len_noise = segment_lengths(noise_segs)
 
-    # orientations
     ori_outline = segment_orientations_deg(contour_segs)
-    ori_noise   = segment_orientations_deg(noise_segs)
+    ori_noise = segment_orientations_deg(noise_segs)
 
-    # nearest-neighbor distances (spacing)
     nn_outline = nearest_neighbor_distances(mp_outline)
-    nn_noise   = nearest_neighbor_distances(mp_noise)
+    nn_noise = nearest_neighbor_distances(mp_noise)
 
-    # densities: segments per 10k pixels
     outline_density = (len(contour_segs) / img_area) * 10000.0
-    noise_density   = (len(noise_segs) / img_area) * 10000.0
+    noise_density = (len(noise_segs) / img_area) * 10000.0
 
-    # mask stats
     mask_stats = compute_mask_stats(mask_u8)
 
-    # coverage by fragments: where frag_canvas is nonzero
-    if frag_canvas.ndim == 3:
-        frag_gray = cv2.cvtColor(frag_canvas, cv2.COLOR_BGR2GRAY)
-    else:
-        frag_gray = frag_canvas.copy()
+    # coverage: how many pixels got hit by any dash (outline+noise)
+    frag_gray = cv2.cvtColor(frag_canvas, cv2.COLOR_BGR2GRAY) if frag_canvas.ndim == 3 else frag_canvas.copy()
     frag_cov_px = int(np.count_nonzero(frag_gray > 0))
     frag_cov_fraction = float(frag_cov_px) / img_area
 
-    # coverage inside vs outside mask
     mask_bool = mask_u8 > 0
-    inside_cov  = int(np.count_nonzero((frag_gray > 0) & mask_bool))
+    inside_cov = int(np.count_nonzero((frag_gray > 0) & mask_bool))
     outside_cov = int(np.count_nonzero((frag_gray > 0) & (~mask_bool)))
-    inside_cov_fraction  = float(inside_cov) / img_area
+    inside_cov_fraction = float(inside_cov) / img_area
     outside_cov_fraction = float(outside_cov) / img_area
 
-    # prepare metrics directory
     metrics_dir = Path(metrics_dir) if metrics_dir is not None else Path(out_dir) / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
-    # ---- save numeric metrics as JSON ----
     metrics = {
         "image_size": {"H": H, "W": W, "area_px": img_area},
         "mask_stats": mask_stats,
@@ -365,54 +357,16 @@ def compute_and_save_metrics(
     with open(json_path, "w") as f:
         json.dump(metrics, f, indent=2)
 
-    # ---- save histograms ----
-    # orientations
-    save_histogram(
-        ori_outline,
-        bins=18,
-        title="Outline orientation (deg)",
-        xlabel="degrees [0, 180)",
-        out_path=metrics_dir / f"{stem}_outline_orientation_hist.png",
-    )
-    save_histogram(
-        ori_noise,
-        bins=18,
-        title="Noise orientation (deg)",
-        xlabel="degrees [0, 180)",
-        out_path=metrics_dir / f"{stem}_noise_orientation_hist.png",
-    )
+    # Histograms for distribution-matching debugging
+    save_histogram(ori_outline, bins=18, title="Outline orientation (deg)", xlabel="degrees [0,180)", out_path=metrics_dir / f"{stem}_outline_orientation_hist.png")
+    save_histogram(ori_noise, bins=18, title="Noise orientation (deg)", xlabel="degrees [0,180)", out_path=metrics_dir / f"{stem}_noise_orientation_hist.png")
 
-    # nearest-neighbor distances
-    save_histogram(
-        nn_outline,
-        bins=20,
-        title="Outline NN distances (px)",
-        xlabel="pixels",
-        out_path=metrics_dir / f"{stem}_outline_nn_hist.png",
-    )
-    save_histogram(
-        nn_noise,
-        bins=20,
-        title="Noise NN distances (px)",
-        xlabel="pixels",
-        out_path=metrics_dir / f"{stem}_noise_nn_hist.png",
-    )
+    save_histogram(nn_outline, bins=20, title="Outline NN distances (px)", xlabel="pixels", out_path=metrics_dir / f"{stem}_outline_nn_hist.png")
+    save_histogram(nn_noise, bins=20, title="Noise NN distances (px)", xlabel="pixels", out_path=metrics_dir / f"{stem}_noise_nn_hist.png")
 
-    # lengths
-    save_histogram(
-        len_outline,
-        bins=20,
-        title="Outline segment lengths (px)",
-        xlabel="pixels",
-        out_path=metrics_dir / f"{stem}_outline_length_hist.png",
-    )
-    save_histogram(
-        len_noise,
-        bins=20,
-        title="Noise segment lengths (px)",
-        xlabel="pixels",
-        out_path=metrics_dir / f"{stem}_noise_length_hist.png",
-    )
+    save_histogram(len_outline, bins=20, title="Outline segment lengths (px)", xlabel="pixels", out_path=metrics_dir / f"{stem}_outline_length_hist.png")
+    save_histogram(len_noise, bins=20, title="Noise segment lengths (px)", xlabel="pixels", out_path=metrics_dir / f"{stem}_noise_length_hist.png")
+
 
 # ==========================================================
 # --------- Contour -> segments (scan & random) -------------
@@ -422,30 +376,37 @@ def contour_to_segments(
     pts: np.ndarray,
     edge_len: int = 18,
     gap_px: tuple[int, int] = (0, 6),
-    jitter_deg: int = 15,
+    jitter_deg: int = 0,
     shape=None,
     thickness: int = 1,
     sep_pad: int = 1,
-    stick_to_contour: bool = False,
+    stick_to_contour: bool = True,
 ):
     """
-    Walk along polyline and break it into short chords.
-    - If stick_to_contour=True: NO rotation; segments hug boundary.
-    - With jitter: chords are rotated slightly.
+    "Scan" mode:
+      Walk along the contour polyline and convert it into dashed chords.
+
+    The key thing for your setup:
+      - If jitter_deg==0 and stick_to_contour=True,
+        segments will closely follow the boundary (good for stimuli).
     """
     if len(pts) < 2:
         return np.zeros((0, 4), np.float32), np.zeros((1, 1), np.uint8)
-    assert shape is not None, "Provide 'shape'=(H,W) for collision checking"
+    assert shape is not None, "Provide shape=(H,W) for collision checking"
 
     H, W = shape
     occ = np.zeros((H, W), np.uint8)
     segs, i = [], 0
     rng = np.random.default_rng()
 
+    # We repeatedly:
+    #  - skip a random gap
+    #  - take a run of length edge_len
+    #  - add that dash if it doesn't collide too much
     while i + 1 < len(pts):
+        # Randomly skip ahead to create gaps along the contour
         if gap_px and gap_px[1] > 0:
-            i = min(i + int(rng.integers(gap_px[0], gap_px[1] + 1)),
-                    len(pts) - 2)
+            i = min(i + int(rng.integers(gap_px[0], gap_px[1] + 1)), len(pts) - 2)
 
         run, j = 0.0, i + 1
         while j < len(pts) and run < edge_len:
@@ -456,23 +417,21 @@ def contour_to_segments(
 
         p1, p2 = pts[i], pts[j - 1]
 
+        # If no jitter: use the contour chord directly
         if stick_to_contour or not jitter_deg:
             q1, q2 = p1, p2
         else:
+            # Optional: slightly rotate dash around its midpoint
             mid = 0.5 * (p1 + p2)
             v = p2 - p1
-            th = np.deg2rad(
-                rng.integers(jitter_deg - 5, jitter_deg + 6)
-            ) * (1 if rng.random() < 0.5 else -1)
-            R = np.array([[np.cos(th), -np.sin(th)],
-                          [np.sin(th),  np.cos(th)]],
-                         dtype=np.float32)
+            th = np.deg2rad(rng.integers(jitter_deg - 5, jitter_deg + 6))
+            th *= (1 if rng.random() < 0.5 else -1)
+            R = np.array([[np.cos(th), -np.sin(th)], [np.sin(th), np.cos(th)]], dtype=np.float32)
             v2 = R @ v
             q1 = mid - 0.5 * v2
             q2 = mid + 0.5 * v2
 
-        seg_mask = rasterize_line_mask(H, W, q1[0], q1[1], q2[0], q2[1],
-                                       thickness=thickness)
+        seg_mask = rasterize_line_mask(H, W, q1[0], q1[1], q2[0], q2[1], thickness=thickness)
         if not intersects(occ, seg_mask, pad=sep_pad):
             segs.append([q1[0], q1[1], q2[0], q2[1]])
             occ = mark_occupied(occ, seg_mask, pad=sep_pad)
@@ -493,14 +452,16 @@ def contour_to_segments_random(
     max_tries: int = 2000,
 ):
     """
-    Rejection-sampling version:
-      - pick random centers along contour
-      - orient segment along local tangent (+ jitter)
-      - reject if it overlaps with existing segments (with padding)
+    "Random" mode:
+      Rejection-sample segments along the contour by picking random contour points
+      and orienting segments along local tangent (+ jitter).
+
+    You probably *don't* want this as your main stimulus mode, because
+    it can produce less uniform gap structure. Keep for ablations.
     """
     if len(pts) < 2:
         return np.zeros((0, 4), np.float32), np.zeros((1, 1), np.uint8)
-    assert shape is not None, "Provide 'shape'=(H,W) for collision checking"
+    assert shape is not None, "Provide shape=(H,W) for collision checking"
 
     H, W = shape
     occ = np.zeros((H, W), np.uint8)
@@ -523,11 +484,8 @@ def contour_to_segments_random(
         c = pts[i]
         t = tang[i]
 
-        th = 0.0
-        if jitter_deg:
-            th = np.deg2rad(rng.integers(-jitter_deg, jitter_deg + 1))
-        R = np.array([[np.cos(th), -np.sin(th)],
-                      [np.sin(th),  np.cos(th)]], dtype=np.float32)
+        th = np.deg2rad(rng.integers(-jitter_deg, jitter_deg + 1)) if jitter_deg else 0.0
+        R = np.array([[np.cos(th), -np.sin(th)], [np.sin(th), np.cos(th)]], dtype=np.float32)
         v = R @ t
 
         q1 = c - half * v
@@ -536,8 +494,7 @@ def contour_to_segments_random(
         x1, y1 = int(np.clip(q1[0], 0, W - 1)), int(np.clip(q1[1], 0, H - 1))
         x2, y2 = int(np.clip(q2[0], 0, W - 1)), int(np.clip(q2[1], 0, H - 1))
 
-        seg_mask = rasterize_line_mask(H, W, x1, y1, x2, y2,
-                                       thickness=thickness)
+        seg_mask = rasterize_line_mask(H, W, x1, y1, x2, y2, thickness=thickness)
         if not intersects(occ, seg_mask, pad=sep_pad):
             segs.append([x1, y1, x2, y2])
             occ = mark_occupied(occ, seg_mask, pad=sep_pad)
@@ -548,6 +505,24 @@ def contour_to_segments_random(
 # ==========================================================
 # --------------- Background noise generators --------------
 # ==========================================================
+
+def sample_angles_from_segments(segments: np.ndarray, n: int, rng: np.random.Generator) -> np.ndarray:
+    """
+    Sample 'n' angles (radians) from the orientation distribution of given segments.
+
+    WHY:
+      If noise has uniform random orientations but outline has boundary-tangent orientations,
+      a model can cheat using orientation cues.
+
+    This makes the *noise* orientation distribution match the *outline* orientation distribution.
+    """
+    if segments is None or len(segments) == 0:
+        return rng.uniform(0, np.pi, size=n)  # fallback (no outline)
+
+    angles_deg = segment_orientations_deg(segments)  # [0, 180)
+    sampled_deg = rng.choice(angles_deg, size=n, replace=True)
+    return np.deg2rad(sampled_deg)
+
 
 def random_noise_segments(
     h: int,
@@ -560,12 +535,18 @@ def random_noise_segments(
     sep_pad: int = 1,
     occ=None,
     tries: int = 6,
+    angle_source_segments: np.ndarray | None = None,
 ):
     """
-    Old grid-based background noise (kept for compatibility).
+    Grid-based noise (legacy).
+
+    NOTE:
+      If you want indistinguishable dashes, you should also feed angle_source_segments
+      so that orientations match the outline.
     """
     rng = np.random.default_rng()
     segs = []
+
     if occ is None:
         occ = np.zeros((h, w), np.uint8)
     else:
@@ -574,31 +555,38 @@ def random_noise_segments(
     for y in range(cell // 2, h, cell):
         for x in range(cell // 2, w, cell):
             for _ in range(n_per_cell):
-                accepted = False
                 for _try in range(tries):
-                    theta = rng.uniform(0, 2 * np.pi)
+                    # Match orientation distribution to outline if provided
+                    if angle_source_segments is not None and len(angle_source_segments) > 0:
+                        theta = float(sample_angles_from_segments(angle_source_segments, 1, rng)[0])
+                        # Expand [0, pi) to [0, 2pi) direction for drawing
+                        if rng.random() < 0.5:
+                            theta += np.pi
+                    else:
+                        theta = rng.uniform(0, 2 * np.pi)
+
                     dx = 0.5 * length * np.cos(theta)
                     dy = 0.5 * length * np.sin(theta)
+
                     x1, y1 = int(x - dx), int(y - dy)
                     x2, y2 = int(x + dx), int(y + dy)
-                    x1 = np.clip(x1, 0, w - 1)
-                    x2 = np.clip(x2, 0, w - 1)
-                    y1 = np.clip(y1, 0, h - 1)
-                    y2 = np.clip(y2, 0, h - 1)
+
+                    x1 = int(np.clip(x1, 0, w - 1))
+                    x2 = int(np.clip(x2, 0, w - 1))
+                    y1 = int(np.clip(y1, 0, h - 1))
+                    y2 = int(np.clip(y2, 0, h - 1))
 
                     mx, my = int((x1 + x2) / 2), int((y1 + y2) / 2)
                     if avoid is not None and avoid[my, mx] > 0:
+                        # For background noise, avoid placing inside the object mask
                         continue
 
-                    seg_mask = rasterize_line_mask(
-                        h, w, x1, y1, x2, y2, thickness=thickness
-                    )
+                    seg_mask = rasterize_line_mask(h, w, x1, y1, x2, y2, thickness=thickness)
                     if not intersects(occ, seg_mask, pad=sep_pad):
                         segs.append([x1, y1, x2, y2])
                         occ = mark_occupied(occ, seg_mask, pad=sep_pad)
-                        accepted = True
                         break
-                # if not accepted: skip
+
     return np.array(segs, dtype=np.float32), occ
 
 
@@ -613,23 +601,38 @@ def random_noise_segments_uniform(
     occ=None,
     tries: int = 10,
     region: str = "any",
+    angle_source_segments: np.ndarray | None = None,
 ):
     """
-    Place 'count' random short lines.
-    region: "any" | "inside" | "outside" with respect to 'avoid' mask.
+    Uniform random placement of short segments.
+
+    region:
+      - "any": place anywhere (except collision constraints)
+      - "inside": only inside the avoid mask
+      - "outside": only outside the avoid mask
+
+    angle_source_segments:
+      - if provided, we sample orientations from those segments
+        (critical for matching outline vs noise local statistics).
     """
     rng = np.random.default_rng()
     segs = []
+
     if occ is None:
         occ = np.zeros((h, w), np.uint8)
     else:
         occ = (occ > 0).astype(np.uint8, copy=False)
 
-    for _ in range(int(count)):
-        accepted = False
+    # Pre-sample angles for speed & to ensure we truly match the distribution
+    if angle_source_segments is not None and len(angle_source_segments) > 0:
+        angles = sample_angles_from_segments(angle_source_segments, int(count), rng)
+    else:
+        angles = None
+
+    for i in range(int(count)):
         for _t in range(tries):
-            cx = rng.integers(0, w)
-            cy = rng.integers(0, h)
+            cx = int(rng.integers(0, w))
+            cy = int(rng.integers(0, h))
 
             if avoid is not None:
                 inside = avoid[cy, cx] > 0
@@ -638,40 +641,43 @@ def random_noise_segments_uniform(
                 if region == "outside" and inside:
                     continue
 
-            theta = rng.uniform(0, 2 * np.pi)
+            theta = float(angles[i]) if angles is not None else float(rng.uniform(0, np.pi))
+            # Expand to both directions to avoid a subtle directional cue
+            if rng.random() < 0.5:
+                theta += np.pi
+
             dx = 0.5 * length * np.cos(theta)
             dy = 0.5 * length * np.sin(theta)
+
             x1, y1 = int(cx - dx), int(cy - dy)
             x2, y2 = int(cx + dx), int(cy + dy)
-            x1 = np.clip(x1, 0, w - 1)
-            x2 = np.clip(x2, 0, w - 1)
-            y1 = np.clip(y1, 0, h - 1)
-            y2 = np.clip(y2, 0, h - 1)
 
-            seg_mask = rasterize_line_mask(h, w, x1, y1, x2, y2,
-                                           thickness=thickness)
+            x1 = int(np.clip(x1, 0, w - 1))
+            x2 = int(np.clip(x2, 0, w - 1))
+            y1 = int(np.clip(y1, 0, h - 1))
+            y2 = int(np.clip(y2, 0, h - 1))
+
+            seg_mask = rasterize_line_mask(h, w, x1, y1, x2, y2, thickness=thickness)
             if not intersects(occ, seg_mask, pad=sep_pad):
                 segs.append([x1, y1, x2, y2])
                 occ = mark_occupied(occ, seg_mask, pad=sep_pad)
-                accepted = True
                 break
-        # if not accepted: skip
+
     return np.array(segs, dtype=np.float32), occ
 
 
-def draw_segments(
-    canvas: np.ndarray,
-    segments: np.ndarray,
-    color=(255, 255, 255),
-    thickness: int = 1,
-) -> None:
+def draw_segments(canvas: np.ndarray, segments: np.ndarray, color=(255, 255, 255), thickness: int = 1) -> None:
+    """Draw (N,4) segments onto the canvas."""
+    if segments is None or len(segments) == 0:
+        return
     for x1, y1, x2, y2 in segments.astype(int):
         cv2.line(canvas, (x1, y1), (x2, y2), color, thickness)
 
 
 def panel3(orig: np.ndarray, frag: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """
-    Simple 1×3 panel: [original | fragmented | mask]
+    Debug panel ONLY.
+    Do NOT feed this into any model/human trials (leaks strong cues).
     """
     m3 = 255 - cv2.cvtColor(255 - mask, cv2.COLOR_GRAY2BGR)
     return np.hstack([orig, frag, m3])
@@ -682,6 +688,10 @@ def panel3(orig: np.ndarray, frag: np.ndarray, mask: np.ndarray) -> np.ndarray:
 # ==========================================================
 
 def _load_image_and_mask(image_path: str, mask_path: str) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Load image + mask.
+    Mask is resized to the image size (nearest neighbor) and binarized.
+    """
     img = cv2.imread(image_path)
     if img is None:
         raise FileNotFoundError(f"cannot read image: {image_path}")
@@ -694,7 +704,6 @@ def _load_image_and_mask(image_path: str, mask_path: str) -> tuple[np.ndarray, n
 def _generate_outline_segments(
     mask: np.ndarray,
     edge_len: int,
-    grid: int,
     gap_factor: float,
     jitter_deg: int,
     thickness: int,
@@ -702,11 +711,19 @@ def _generate_outline_segments(
     outline_mode: str,
     max_outline_segments: int | None,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Convert the mask boundary into dashed line segments.
+
+    IMPORTANT change vs your previous version:
+      - gap is now tied to edge_len (dash length), not grid.
+        That keeps outline/noise local geometry consistent and tunable.
+    """
     cnt = largest_external_contour(mask)
     if cnt is None:
         raise RuntimeError("no contour found in mask")
 
     pts = resample_polyline(cnt, step_px=3)
+
     if outline_mode == "random":
         return contour_to_segments_random(
             pts,
@@ -718,10 +735,12 @@ def _generate_outline_segments(
             sep_pad=max(1, sep_pad),
         )
 
+    # Gap measured in pixels; scale to edge_len so "dash + gap" stays consistent across images.
+    gap_hi = max(1, int(round(gap_factor * edge_len)))
     return contour_to_segments(
         pts,
         edge_len=edge_len,
-        gap_px=(0, int(gap_factor * grid)),
+        gap_px=(0, gap_hi),
         jitter_deg=jitter_deg,
         shape=mask.shape[:2],
         thickness=thickness,
@@ -744,8 +763,18 @@ def _generate_noise_segments(
     outside_noise_count: int | None,
     inside_noise_len: int | None,
     outside_noise_len: int | None,
+    contour_segs: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Generate background noise segments.
+
+    CRITICAL for your experiment:
+      - use angle_source_segments=contour_segs to match orientation distribution
+      - keep length=edge_len so dash length matches outline
+      - draw with the same color & thickness later
+    """
     H, W = mask.shape[:2]
+
     if noise_mode == "grid":
         return random_noise_segments(
             H,
@@ -758,8 +787,11 @@ def _generate_noise_segments(
             sep_pad=max(1, sep_pad),
             occ=occ,
             tries=6,
+            angle_source_segments=contour_segs,
         )
 
+    # Default: put noise anywhere (not restricted to inside/outside),
+    # but match orientation distribution to the outline.
     if inside_noise_count is None and outside_noise_count is None:
         return random_noise_segments_uniform(
             H,
@@ -772,9 +804,13 @@ def _generate_noise_segments(
             occ=occ,
             tries=10,
             region="any",
+            angle_source_segments=contour_segs,
         )
 
+    # Optional: split noise counts inside vs outside object.
+    # NOTE: Be careful—this can introduce subtle cues depending on your setup.
     all_noise = []
+
     if inside_noise_count is None:
         inside_noise_count = noise_count
     if outside_noise_count is None:
@@ -786,31 +822,31 @@ def _generate_noise_segments(
 
     if inside_noise_count > 0:
         segs_in, occ = random_noise_segments_uniform(
-            H,
-            W,
+            H, W,
             count=int(inside_noise_count),
-            length=inside_noise_len,
+            length=int(inside_noise_len),
             thickness=thickness,
             avoid=mask,
             sep_pad=max(1, sep_pad),
             occ=occ,
             tries=10,
             region="inside",
+            angle_source_segments=contour_segs,
         )
         all_noise.append(segs_in)
 
     if outside_noise_count > 0:
         segs_out, occ = random_noise_segments_uniform(
-            H,
-            W,
+            H, W,
             count=int(outside_noise_count),
-            length=outside_noise_len,
+            length=int(outside_noise_len),
             thickness=thickness,
             avoid=mask,
             sep_pad=max(1, sep_pad),
             occ=occ,
             tries=10,
             region="outside",
+            angle_source_segments=contour_segs,
         )
         all_noise.append(segs_out)
 
@@ -819,61 +855,76 @@ def _generate_noise_segments(
 
 
 def fragment_one(
-    image_path,
-    mask_path,
-    out_dir,
+    image_path: str,
+    mask_path: str,
+    out_dir: str,
     output_stem: Optional[str] = None,
-    edge_len=-1,
-    grid=40,
-    gap_factor=0.4,
-    jitter_deg=0,
-    noise_per_cell=1,
-    thickness=1,
-    noise_mode="uniform",       # "uniform" or "grid"
-    noise_count=300,            # used when noise_mode="uniform"
-    sep_pad=1,
-    target_frag_per_100px=6,
-    outline_mode="scan",        # "scan" or "random"
+    edge_len: int = -1,
+    grid: int = 40,
+    gap_factor: float = 0.4,
+    jitter_deg: int = 0,
+    noise_per_cell: int = 1,
+    thickness: int = 1,
+    noise_mode: str = "uniform",      # "uniform" or "grid"
+    noise_count: int = 300,           # used when noise_mode="uniform"
+    sep_pad: int = 1,
+    target_frag_per_100px: float = 6,
+    outline_mode: str = "scan",       # "scan" or "random"
     max_outline_segments=None,
-    inside_noise_count=None,    # if None -> fall back to noise_count
+    inside_noise_count=None,
     outside_noise_count=None,
-    inside_noise_len=None,      # if None -> use edge_len
+    inside_noise_len=None,
     outside_noise_len=None,
+    # New: allow splitting outputs to prevent cue leakage
+    stimuli_subdir: str = "fragments",
+    debug_subdir: str = "debug",
 ):
     """
     Core entry point: one image + one mask.
+
+    Output discipline (IMPORTANT):
+      - "stimulus" image (outline+noise only) goes in out_dir/<stimuli_subdir>
+      - debug images (outline-only + panel + metrics) can go elsewhere
+
+    This helps ensure you don't accidentally train/evaluate on debug panels.
     """
     t0 = time.perf_counter()
 
     out_root = Path(out_dir)
     out_root.mkdir(parents=True, exist_ok=True)
-    fragments_dir = out_root / "fragments"
-    outlines_dir = out_root / "outlines"
-    panels_dir = out_root / "panels"
-    metrics_dir = out_root / "metrics"
-    fragments_dir.mkdir(parents=True, exist_ok=True)
+
+    # Stimuli directory: only what humans/models should see
+    stimuli_dir = out_root / stimuli_subdir
+    stimuli_dir.mkdir(parents=True, exist_ok=True)
+
+    # Debug directory: outline-only, panels, etc. (do not feed to models)
+    debug_dir = out_root / debug_subdir
+    outlines_dir = debug_dir / "outlines"
+    panels_dir = debug_dir / "panels"
+    metrics_dir = debug_dir / "metrics"
     outlines_dir.mkdir(parents=True, exist_ok=True)
     panels_dir.mkdir(parents=True, exist_ok=True)
     metrics_dir.mkdir(parents=True, exist_ok=True)
+
     name = output_stem or Path(image_path).stem
 
     img, mask = _load_image_and_mask(image_path, mask_path)
 
-    # auto density from outline if edge_len < 0
+    # If edge_len not specified, choose based on mask perimeter
     if edge_len is None or edge_len < 0:
         perim = approx_perimeter(mask)
         edge_len, gap_factor = choose_edge_and_gap(
             perimeter_px=perim,
             target_frag_per_100px=target_frag_per_100px,
-            min_edge=10, max_edge=24,
+            min_edge=10,
+            max_edge=24,
             gap_factor=gap_factor,
         )
 
-    # 1) outline contour → segments
+    # 1) outline segments along the object boundary
     contour_segs, occ = _generate_outline_segments(
         mask=mask,
         edge_len=edge_len,
-        grid=grid,
         gap_factor=gap_factor,
         jitter_deg=jitter_deg,
         thickness=thickness,
@@ -882,12 +933,17 @@ def fragment_one(
         max_outline_segments=max_outline_segments,
     )
 
-    frag = np.zeros_like(img)
-    draw_segments(frag, contour_segs,
-                  color=(255, 255, 255), thickness=thickness)
-    cv2.imwrite(str(outlines_dir / f"{name}_outline.png"), frag)
+    # We render stimulus on a black canvas.
+    # NOTE: we intentionally do NOT use the original image in the stimulus.
+    stimulus = np.zeros_like(img)
 
-    # 2) background noise
+    # Draw outline dashes (white)
+    draw_segments(stimulus, contour_segs, color=(255, 255, 255), thickness=thickness)
+
+    # Save outline-only debug view
+    cv2.imwrite(str(outlines_dir / f"{name}_outline.png"), stimulus)
+
+    # 2) background noise: match local stats to outline (length/orientation/thickness/color)
     noise_segs, occ = _generate_noise_segments(
         mask=mask,
         occ=occ,
@@ -902,31 +958,36 @@ def fragment_one(
         outside_noise_count=outside_noise_count,
         inside_noise_len=inside_noise_len,
         outside_noise_len=outside_noise_len,
+        contour_segs=contour_segs,
     )
 
-    draw_segments(frag, noise_segs,
-                  color=(220, 220, 220), thickness=thickness)
+    # Draw noise with IDENTICAL appearance (same color + thickness)
+    draw_segments(stimulus, noise_segs, color=(255, 255, 255), thickness=thickness)
 
-    out_frag = fragments_dir / f"{name}_fragmented.png"
+    # Save the final stimulus image (this is what you should feed into models/humans)
+    out_stimulus = stimuli_dir / f"{name}_fragmented.png"
+    cv2.imwrite(str(out_stimulus), stimulus)
+
+    # Debug panel (orig | stimulus | mask) — never use as model input
     out_panel = panels_dir / f"{name}_panel.png"
-    cv2.imwrite(str(out_frag), frag)
-    cv2.imwrite(str(out_panel), panel3(img, frag, mask))
+    cv2.imwrite(str(out_panel), panel3(img, stimulus, mask))
 
     t1 = time.perf_counter()
-    print(f"saved: {out_frag} and {out_panel}  | "
-          f"outline={outline_mode}  | time={t1 - t0:.3f}s")
+    print(
+        f"saved stimulus: {out_stimulus} | debug panel: {out_panel} | "
+        f"outline_mode={outline_mode} | edge_len={edge_len} | time={t1 - t0:.3f}s"
+    )
 
-    # --- metrics: density, orientation, spacing, coverage ---
+    # Metrics/histograms (debug/analysis only)
     compute_and_save_metrics(
         contour_segs=contour_segs,
         noise_segs=noise_segs,
         mask_u8=mask,
-        frag_canvas=frag,
-        out_dir=out_root,
+        frag_canvas=stimulus,
+        out_dir=debug_dir,
         stem=name,
         metrics_dir=metrics_dir,
     )
-
 
 
 # ==========================================================
@@ -934,6 +995,18 @@ def fragment_one(
 # ==========================================================
 
 def main():
+    """
+    Standalone mode for quick local testing:
+      expects:
+        images/   (input images)
+        masks/    (binary masks named <stem>_mask.png)
+      writes:
+        outputs/mask_fragmenter/
+          fragments/ (stimuli only)
+          debug/     (outline/panels/metrics)
+
+    This is NOT your COCO pipeline, just a quick sanity harness.
+    """
     images_dir = Path("images")
     masks_dir = Path("masks")
     out_dir = Path("outputs") / "mask_fragmenter"
@@ -950,24 +1023,24 @@ def main():
             continue
 
         fragment_one(
-            str(img_p),
-            str(msk_p),
-            str(out_dir),
-            edge_len=-1,                  # auto from perimeter
-            target_frag_per_100px=7,      # denser outline
-            grid=40,
-            gap_factor=0.25,
-            jitter_deg=0,                 # 0 → chords stick to contour
+            image_path=str(img_p),
+            mask_path=str(msk_p),
+            out_dir=str(out_dir),
+            edge_len=-1,                 # auto from perimeter
+            target_frag_per_100px=7,     # denser outline
+            gap_factor=0.25,             # gaps relative to dash length
+            jitter_deg=0,                # 0 = hug the contour (best for your goal)
             thickness=1,
             noise_mode="uniform",
             noise_count=400,
             sep_pad=1,
             outline_mode="scan",
             max_outline_segments=None,
-            inside_noise_count=1100,
-            outside_noise_count=600,
-            inside_noise_len=6,
-            outside_noise_len=8,
+            # If you turn these on, be mindful about cue leakage
+            inside_noise_count=None,
+            outside_noise_count=None,
+            inside_noise_len=None,
+            outside_noise_len=None,
         )
 
 
