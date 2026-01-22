@@ -849,13 +849,9 @@ def _generate_outline_segments(
     sep_pad: int,
     outline_mode: str,
     max_outline_segments: int | None,
-) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
     """
     Convert the mask boundary into dashed line segments.
-
-    IMPORTANT change vs your previous version:
-      - gap is now tied to edge_len (dash length), not grid.
-        That keeps outline/noise local geometry consistent and tunable.
     """
     cnt = largest_external_contour(mask)
     if cnt is None:
@@ -1142,8 +1138,6 @@ def main():
         outputs/mask_fragmenter/
           fragments/ (stimuli only)
           debug/     (outline/panels/metrics)
-
-    This is NOT your COCO pipeline, just a quick sanity harness.
     """
     images_dir = Path("images")
     masks_dir = Path("masks")
@@ -1174,7 +1168,7 @@ def main():
             sep_pad=1,
             outline_mode="scan",
             max_outline_segments=None,
-            # If you turn these on, be mindful about cue leakage
+            # If these are on, be mindful about cue leakage
             inside_noise_count=None,
             outside_noise_count=None,
             inside_noise_len=None,

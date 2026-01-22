@@ -172,7 +172,7 @@ def main():
                 continue
 
             m_u8 = (m * 255).astype(np.uint8)
-            inst_mask_path = out_masks / f"{stem}_ann{ann_id}.png"
+            inst_mask_path = out_masks / f"{stem}_ann{ann_id}_mask.png"
             cv2.imwrite(str(inst_mask_path), m_u8)
 
             instance_stem = f"{stem}_ann{ann_id}"
