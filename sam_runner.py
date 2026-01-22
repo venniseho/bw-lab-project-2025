@@ -148,35 +148,53 @@ def segment_with_sam_centroid_point(
     best_idx = int(np.argmax(scores))  # <-- IMPORTANT: no GT-based selection
     return masks[best_idx].astype(bool), (cx, cy), float(scores[best_idx])
 
-
-def overlay_mask(
+def overlay_pred_and_gt(
     image_bgr: np.ndarray,
-    seg_bool: np.ndarray | None,
-    color=(0, 255, 0),
-    alpha: float = 0.5,
+    pred_bool: np.ndarray | None,
+    gt_mask_u8: np.ndarray | None,
+    *,
+    pred_color=(255, 255, 0),   # light cyan (BGR)
+    pred_alpha: float = 0.35,
+    gt_color=(0, 0, 255),       # red (BGR)
+    gt_alpha: float = 0.25,
     point: tuple[float, float] | None = None,
-    point_color=(0, 0, 255),
-    point_radius: int = 4,
+    point_color=(255, 0, 0),    # bright blue dot (BGR)
+    point_radius: int = 5,
 ) -> np.ndarray:
     """
-    Alpha-blend a predicted mask onto the image; optionally draw a dot at the prompt.
+    Overlay GT + prediction on top of an image.
 
-    DEBUG ONLY: do not use these overlays as model inputs.
+    Order matters:
+      1) GT overlay (reddish)
+      2) Pred overlay (cyan-ish)
+      3) Prompt point dot (blue)
+
+    DEBUG ONLY: do not feed these overlays to models/humans.
     """
     out = image_bgr.copy()
 
-    if seg_bool is not None:
-        seg_bool = seg_bool.astype(bool)
-        overlay = out.copy()
-        overlay[seg_bool] = color
-        out = cv2.addWeighted(overlay, alpha, out, 1 - alpha, 0)
+    # --- GT overlay first ---
+    if gt_mask_u8 is not None:
+        gt_bool = (gt_mask_u8 > 0)
+        if np.any(gt_bool):
+            ov = out.copy()
+            ov[gt_bool] = gt_color
+            out = cv2.addWeighted(ov, gt_alpha, out, 1.0 - gt_alpha, 0)
 
+    # --- Pred overlay second ---
+    if pred_bool is not None:
+        pred_bool = pred_bool.astype(bool)
+        if np.any(pred_bool):
+            ov = out.copy()
+            ov[pred_bool] = pred_color
+            out = cv2.addWeighted(ov, pred_alpha, out, 1.0 - pred_alpha, 0)
+
+    # --- Prompt point ---
     if point is not None:
         cx, cy = point
         cv2.circle(out, (int(round(cx)), int(round(cy))), point_radius, point_color, -1)
 
     return out
-
 
 # ------------------------------------------------------------
 # Public: run SAM on original + fragmented
@@ -241,11 +259,21 @@ def run_sam_on_pair(
 
     # SAM on original (centroid point)
     seg_orig, pt_orig, score_orig = segment_with_sam_centroid_point(orig, gt_orig)
-    ov_orig = overlay_mask(orig, seg_orig, point=pt_orig)
+    ov_orig = overlay_pred_and_gt(
+        orig,
+        pred_bool=seg_orig,
+        gt_mask_u8=gt_orig,
+        point=pt_orig,
+    )
 
     # SAM on fragmented (centroid point)
     seg_frag, pt_frag, score_frag = segment_with_sam_centroid_point(frag, gt_frag)
-    ov_frag = overlay_mask(frag, seg_frag, point=pt_frag)
+    ov_frag = overlay_pred_and_gt(
+        frag,
+        pred_bool=seg_frag,
+        gt_mask_u8=gt_frag,
+        point=pt_frag,
+    )
 
     # IoUs
     iou_orig = iou_u8(gt_orig, seg_orig)
@@ -254,10 +282,19 @@ def run_sam_on_pair(
     # Chance baseline (predict whole image)
     chance = chance_iou_full_image(gt_frag)
 
-    # bottom panel: [GT mask | fragmented | SAM on fragmented]
-    mask_bgr = cv2.cvtColor(gt_frag, cv2.COLOR_GRAY2BGR)
-    panel_bottom = np.hstack([mask_bgr, frag, ov_frag])
+    # bottom panel: [GT overlay on fragmented | fragmented stimulus | GT+SAM overlay on fragmented]
+    gt_on_frag = overlay_pred_and_gt(
+        frag,
+        pred_bool=None,
+        gt_mask_u8=gt_frag,
+        point=None,
+        gt_color=(0, 0, 255),   # reddish GT
+        gt_alpha=0.25,
+    )
 
+    # ov_frag is already GT + SAM + point (from earlier)
+    panel_bottom = np.hstack([gt_on_frag, frag, ov_frag])
+    
     # Save
     cv2.imwrite(str(out_dir / f"{stem}_sam_orig.png"), ov_orig)
     cv2.imwrite(str(out_dir / f"{stem}_sam_frag.png"), ov_frag)
