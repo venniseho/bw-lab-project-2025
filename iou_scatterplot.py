@@ -14,9 +14,10 @@ plt.ylabel('iou on fragmented photo')
 plt.title('iou on original vs fragmented photos')
 
 # x and y axis limits
-plt.set_aspect('equal', adjustable='box')
 plt.xlim(0, 1)
 plt.ylim(0, 1)
+
+plt.gca().set_aspect('equal', adjustable='box')
 
 # Save the plot
 plt.savefig('outputs/tests/manual_coco_check/metrics/sam_iou_scatterplot.png')
