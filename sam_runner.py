@@ -110,6 +110,28 @@ def chance_iou_full_image(gt_mask_u8: np.ndarray) -> float:
     gt = (gt_mask_u8 > 0)
     return float(gt.sum()) / float(gt.size) if gt.size > 0 else 0.0
 
+def normalized_iou(gt_mask_u8: np.ndarray, pred_bool: np.ndarray | None) -> float:
+    """
+    Normalize IoU so that:
+      - 0.0 == predicting the entire image as foreground
+      - 1.0 == perfect segmentation
+
+    nIoU = (IoU - chance) / (1 - chance), clamped to [0,1].
+    """
+    if pred_bool is None:
+        return 0.0
+
+    iou = iou_u8(gt_mask_u8, pred_bool)
+    chance = chance_iou_full_image(gt_mask_u8)
+
+    denom = (1.0 - chance)
+    if denom <= 1e-9:
+        # GT fills whole image (degenerate) -> treat as perfect if IoU==1 else 0
+        return 1.0 if iou >= 1.0 - 1e-9 else 0.0
+
+    n = (iou - chance) / denom
+    return float(np.clip(n, 0.0, 1.0))
+
 
 def segment_with_sam_centroid_point(
     image_bgr: np.ndarray,
@@ -354,6 +376,8 @@ def run_sam_on_pair(
     iou_orig = iou_u8(gt_orig, seg_orig)
     iou_frag = iou_u8(gt_frag, seg_frag)
     chance = chance_iou_full_image(gt_frag)
+    niou_orig = normalized_iou(gt_orig, seg_orig)
+    niou_frag = normalized_iou(gt_frag, seg_frag)
 
     # --------------------------------------------------
     # Panel construction
@@ -394,6 +418,8 @@ def run_sam_on_pair(
         "iou_orig": float(iou_orig),
         "iou_frag": float(iou_frag),
         "chance_iou": float(chance),
+        "niou_orig": float(niou_orig),
+        "niou_frag": float(niou_frag),
         "score_orig": score_orig,
         "score_frag": score_frag,
     }

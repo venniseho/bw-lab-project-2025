@@ -263,6 +263,8 @@ def main():
                 "iou_orig": res["iou_orig"],
                 "iou_frag": res["iou_frag"],
                 "chance_iou": res["chance_iou"],
+                "niou_orig": res.get("niou_orig", None),
+                "niou_frag": res.get("niou_frag", None),
                 "score_orig": res["score_orig"],
                 "score_frag": res["score_frag"],
             }
@@ -284,6 +286,8 @@ def main():
                 "iou_orig",
                 "iou_frag",
                 "chance_iou",
+                "niou_orig",
+                "niou_frag",
                 "score_orig",
                 "score_frag",
             ],
