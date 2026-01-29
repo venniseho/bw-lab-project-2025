@@ -17,7 +17,7 @@ This script:
   - Writes overlays + panels into:
       out_root/debug/sam_overlays/
   - Writes CSV metrics into:
-      out_root/debug/metrics/sam_iou.csv
+      out_root/metrics/sam_iou.csv
 
 EVAL VALIDITY:
   - GT is used ONLY to compute the centroid point prompt.
@@ -192,7 +192,7 @@ def main():
     # Write stage 2 outputs into debug/ (keeps stimuli folder clean)
     debug_dir = out_root / "debug"
     overlays_dir = debug_dir / "sam_overlays"
-    metrics_dir = debug_dir / "metrics"
+    metrics_dir = out_root / "metrics"
     overlays_dir.mkdir(parents=True, exist_ok=True)
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
