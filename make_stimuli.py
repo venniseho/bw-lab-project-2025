@@ -2,11 +2,10 @@
 """
 make_stimuli.py
 --------------------------------------------------------------
-STAGE A: COCO -> per-instance masks -> fragmented stimuli (+ metrics)
+STAGE 1: COCO -> per-instance masks -> fragmented stimuli (+ metrics)
 
 This script is the "stimuli generation" half of the pipeline.
 
-It:
   1) loads COCO images + instance annotations
   2) writes:
        out_root/assets/images/<img_stem>.png
@@ -32,6 +31,7 @@ from __future__ import annotations
 import argparse
 import csv
 import time
+import json
 from pathlib import Path
 
 import cv2
@@ -43,7 +43,10 @@ import mask_fragmenter_clean as frag
 
 def _resolve_image_path(img_dir: Path, file_name: str) -> Path:
     """
-    COCO file_name is sometimes nested; handle common cases robustly.
+    COCO file_name is sometimes nested (e.g. 'COCO_val2014_....jpg' or 'val2014/....jpg').
+    We try:
+      1) img_dir / file_name
+      2) img_dir / basename(file_name)
     """
     p = img_dir / file_name
     if p.exists():
@@ -53,13 +56,7 @@ def _resolve_image_path(img_dir: Path, file_name: str) -> Path:
     if q.exists():
         return q
 
-    parts = Path(file_name).parts
-    if len(parts) >= 3 and parts[0] == "COCO" and parts[1].startswith("val"):
-        r = img_dir / parts[-1]
-        if r.exists():
-            return r
-
-    return p
+    return p  # let caller .exists() fail
 
 
 def get_image_annotation_info(coco: COCO, img_id: int):
@@ -133,6 +130,7 @@ def main():
     indexes_dir.mkdir(parents=True, exist_ok=True)
 
     index_path = indexes_dir / "stimuli_index.csv"
+    manifest_path = indexes_dir / "manifest.jsonl"
 
     coco = COCO(args.coco_ann)
     print(f"Loaded {len(coco.imgs)} images and {len(coco.anns)} annotations.\n")
@@ -141,17 +139,18 @@ def main():
     t_total0 = time.perf_counter()
 
     fieldnames = [
-        "instance_id",
-        "coco_image_id",
-        "coco_ann_id",
-        "orig_img_path",
-        "frag_img_path",
-        "gt_mask_path",
-        "outline_img_path",
-        "metrics_json_path",
-    ]
+    "instance_id",
+    "coco_image_id",
+    "coco_ann_id",
+    "orig_img_path",
+    "frag_img_path",
+    "gt_mask_path",
+    "outline_img_path",
+    "panel_img_path",
+    "metrics_json_path",
+]
 
-    with open(index_path, "w", newline="") as f_csv:
+    with open(index_path, "w", newline="") as f_csv, open(manifest_path, "w") as f_manifest:
         writer = csv.DictWriter(f_csv, fieldnames=fieldnames)
         writer.writeheader()
 
@@ -222,6 +221,7 @@ def main():
                 )
 
                 # Paths that fragment_one produces (based on its directory conventions)
+                panel_img_path = out_root / debug_subdir / "panels" / f"{instance_id}_panel.png"
                 frag_img_path = out_root / stimuli_subdir / f"{instance_id}_fragmented.png"
                 outline_img_path = out_root / debug_subdir / "outlines" / f"{instance_id}_outline.png"
                 metrics_json_path = out_root / debug_subdir / "metrics" / f"{instance_id}_metrics.json"
@@ -235,8 +235,17 @@ def main():
                     "frag_img_path": frag_img_path,
                     "gt_mask_path": inst_mask_path,
                     "outline_img_path": outline_img_path,
+                    "panel_img_path": panel_img_path,
                     "metrics_json_path": metrics_json_path,
                 })
+                
+                rec = {
+                    "stem": instance_id,
+                    "orig_img_path": str(dst_img),
+                    "frag_img_path": str(frag_img_path),
+                    "gt_mask_path": str(inst_mask_path),
+                }
+                f_manifest.write(json.dumps(rec) + "\n")
 
                 kept_instances += 1
 
@@ -258,6 +267,8 @@ def main():
     print(f"Stimuli (SAFE)    -> {out_root / stimuli_subdir}")
     print(f"Debug (UNSAFE)    -> {out_root / debug_subdir}")
     print(f"Index CSV      -> {index_path}")
+    print(f"Manifest JSONL -> {manifest_path}")
+
 
 
 if __name__ == "__main__":

@@ -2,8 +2,8 @@
 sam_runner.py
 --------------------------------------------------------------
 Utilities for running SAM on:
-  - the original COCO image
-  - the fragmented stimulus image
+  • the original COCO image
+  • the fragmented stimulus image
 
 Prompting (for now):
   - Single positive point at the centroid of the GT mask.
@@ -21,6 +21,7 @@ Saves DEBUG outputs:
         row2: overlay(orig) | overlay(frag) | GT mask outline (frag-sized)
 
 Outputs are DEBUG/ANALYSIS ONLY (do not feed overlays or panels to models/humans).
+--------------------------------------------------------------
 """
 
 from __future__ import annotations
@@ -272,25 +273,35 @@ def run_sam_on_pair(
     sam_checkpoint: str,
     model_type: str = "vit_h",
     device: str | None = None,
+    outline_img_path: str | None = None,
 ):
     """
-    Runs SAM on original + fragmented using centroid point prompt.
+    Runs SAM on original + fragmented using a centroid point prompt.
 
-    Writes (DEBUG):
-      <stem>_overlay_orig.png
-      <stem>_overlay_frag.png
+    PANEL LAYOUT (3 columns x 2 rows):
+
+      ┌───────────────┬───────────────────┬───────────────┐
+      │ Original RGB  │ Fragmented Stim.  │ GT Mask       │
+      ├───────────────┼───────────────────┼───────────────┤
+      │ SAM on Orig   │ SAM on Fragmented │ Outline-only  │
+      └───────────────┴───────────────────┴───────────────┘
+
+    Saves:
+      <stem>_sam_orig.png
+      <stem>_sam_frag.png
       <stem>_panel_3x2.png
-
-    Returns dict with IoU + scores.
     """
+
     init_sam(sam_checkpoint, model_type=model_type, device=device)
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Use fragment filename to avoid overwriting per-instance outputs
     stem = Path(frag_img_path).stem.replace("_fragmented", "")
 
+    # --------------------------------------------------
+    # Load inputs
+    # --------------------------------------------------
     orig = cv2.imread(orig_img_path)
     frag = cv2.imread(frag_img_path)
     gt_mask_full = cv2.imread(gt_mask_path, cv2.IMREAD_GRAYSCALE)
@@ -306,44 +317,75 @@ def run_sam_on_pair(
             "score_frag": None,
         }
 
-    # Resize GT to match each image (for prompting + IoU)
+    # --------------------------------------------------
+    # Resize GT masks
+    # --------------------------------------------------
     H, W = orig.shape[:2]
     gt_orig = cv2.resize(gt_mask_full, (W, H), interpolation=cv2.INTER_NEAREST)
 
     Hf, Wf = frag.shape[:2]
     gt_frag = cv2.resize(gt_mask_full, (Wf, Hf), interpolation=cv2.INTER_NEAREST)
 
+    # --------------------------------------------------
     # SAM on original
+    # --------------------------------------------------
     seg_orig, pt_orig, score_orig = segment_with_sam_centroid_point(orig, gt_orig)
-    ov_orig = overlay_pred_and_gt(orig, pred_bool=seg_orig, gt_mask_u8=gt_orig, point=pt_orig)
-
-    # SAM on fragmented
-    seg_frag, pt_frag, score_frag = segment_with_sam_centroid_point(frag, gt_frag)
-    ov_frag = overlay_pred_and_gt(frag, pred_bool=seg_frag, gt_mask_u8=gt_frag, point=pt_frag)
-
-    # IoUs
-    iou_orig = iou_u8(gt_orig, seg_orig)
-    iou_frag = iou_u8(gt_frag, seg_frag)
-
-    # Chance baseline (predict full image)
-    chance = chance_iou_full_image(gt_frag)
-
-    # 3×2 panel (standardized to frag resolution)
-    panel = make_panel_3x2(
-        orig_bgr=orig,
-        frag_bgr=frag,
-        gt_mask_full_u8=gt_mask_full,
-        ov_orig=ov_orig,
-        ov_frag=ov_frag,
+    ov_orig = overlay_pred_and_gt(
+        orig,
+        pred_bool=seg_orig,
+        gt_mask_u8=gt_orig,
+        point=pt_orig,
     )
 
-    # Save
-    cv2.imwrite(str(out_dir / f"{stem}_overlay_orig.png"), ov_orig)
-    cv2.imwrite(str(out_dir / f"{stem}_overlay_frag.png"), ov_frag)
-    cv2.imwrite(str(out_dir / f"{stem}_panel_3x2.png"), panel)
+    # --------------------------------------------------
+    # SAM on fragmented
+    # --------------------------------------------------
+    seg_frag, pt_frag, score_frag = segment_with_sam_centroid_point(frag, gt_frag)
+    ov_frag = overlay_pred_and_gt(
+        frag,
+        pred_bool=seg_frag,
+        gt_mask_u8=gt_frag,
+        point=pt_frag,
+    )
+
+    # --------------------------------------------------
+    # Metrics
+    # --------------------------------------------------
+    iou_orig = iou_u8(gt_orig, seg_orig)
+    iou_frag = iou_u8(gt_frag, seg_frag)
+    chance = chance_iou_full_image(gt_frag)
+
+    # --------------------------------------------------
+    # Panel construction
+    # --------------------------------------------------
+    # Top row
+    gt_vis = cv2.cvtColor(gt_frag, cv2.COLOR_GRAY2BGR)
+    top_row = np.hstack([orig, frag, gt_vis])
+
+    # Bottom-right: outline-only image
+    outline_cell = None
+    if outline_img_path is not None:
+        outline_cell = cv2.imread(outline_img_path, cv2.IMREAD_COLOR)
+
+    if outline_cell is None:
+        outline_cell = np.zeros_like(frag)
+
+    if outline_cell.shape[:2] != frag.shape[:2]:
+        outline_cell = cv2.resize(outline_cell, (Wf, Hf), interpolation=cv2.INTER_NEAREST)
+
+    bottom_row = np.hstack([ov_orig, ov_frag, outline_cell])
+
+    panel_3x2 = np.vstack([top_row, bottom_row])
+
+    # --------------------------------------------------
+    # Save outputs
+    # --------------------------------------------------
+    cv2.imwrite(str(out_dir / f"{stem}_sam_orig.png"), ov_orig)
+    cv2.imwrite(str(out_dir / f"{stem}_sam_frag.png"), ov_frag)
+    cv2.imwrite(str(out_dir / f"{stem}_panel_3x2.png"), panel_3x2)
 
     print(
-        f"SAM overlays saved for {stem} | "
+        f"SAM done for {stem} | "
         f"IoU(orig)={iou_orig:.3f} IoU(frag)={iou_frag:.3f} chance={chance:.3f}"
     )
 
