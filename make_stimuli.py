@@ -37,6 +37,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from pycocotools.coco import COCO
+from skimage.measure import label 
 
 import mask_fragmenter_clean as frag
 
@@ -88,7 +89,36 @@ def write_index_row(writer: csv.DictWriter, row: dict):
         if isinstance(v, Path):
             row2[k] = str(v)
     writer.writerow(row2)
+    
+def is_mask_valid(mask_u8: np.ndarray) -> tuple[bool, str]:
+    """
+    Validates mask based on experiment constraints:
+      1. Must be a single connected component (no disconnected fragments).
+      2. Centre point must be inside the mask (convexity check).
+    """
+    # 1. Check connectivity
+    # label() returns a labeled array and the number of labels (background=0 is ignored)
+    _, num_components = label(mask_u8 > 0, return_num=True, connectivity=1)
+    if num_components != 1:
+        return False, f"disconnected components ({num_components})"
 
+    # 2. Check centroid containment
+    ys, xs = np.where(mask_u8 > 0)
+    if len(xs) == 0:
+        return False, "empty"
+    
+    # Simple geometric centroid
+    cy, cx = int(ys.mean()), int(xs.mean())
+    
+    # Ensure coordinates are within bounds
+    H, W = mask_u8.shape
+    cy = np.clip(cy, 0, H - 1)
+    cx = np.clip(cx, 0, W - 1)
+
+    if mask_u8[cy, cx] == 0:
+        return False, "centroid outside mask"
+
+    return True, "ok"
 
 def main():
     ap = argparse.ArgumentParser(description="STAGE 1: COCO -> fragmented-contour stimuli + metrics + indexes")
@@ -192,8 +222,16 @@ def main():
 
                 instance_id = f"{img_stem}_ann{ann_id}"
 
-                # Save GT mask per instance
+                # mask filtering based on connectivity + centroid check
                 m_u8 = (m01 * 255).astype(np.uint8)
+                is_valid, reason = is_mask_valid(m_u8)
+                
+                if not is_valid:
+                    # Optional: print skipped reason for debugging
+                    print(f"Skipping {instance_id}: {reason}")
+                    continue
+                
+                # Save GT mask per instance
                 inst_mask_path = assets_masks / f"{instance_id}_mask.png"
                 cv2.imwrite(str(inst_mask_path), m_u8)
 
