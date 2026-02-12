@@ -23,7 +23,7 @@ pip install \
     opencv-python \
     pycocotools \
     torchvision \ 
-    pytest
+    # pytest
 
 # 3. Install Segment Anything
 if [ ! -d "segment-anything" ]; then

@@ -14,6 +14,7 @@ dependencies
 - segment_anything
 - opencv-python
 - torchvision
+- scikit-image
 
 # running slurm
 salloc -p hovennis --gres=gpu:1 --mem=16G --cpus-per-task=4 --time=01:00:00

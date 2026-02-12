@@ -34,8 +34,11 @@ If you omit --manifest, it will try to glob:
 and infer matching assets/images + assets/masks.
 
 --------------------------------------------------------------
+Updates:
+  - Adds --prompt_mode argument.
+  - Saves Oracle IoU and ARI metrics.
+--------------------------------------------------------------
 """
-
 from __future__ import annotations
 
 import argparse
@@ -55,8 +58,7 @@ def infer_sam_model_type_from_ckpt(ckpt_path: str) -> str:
         return "vit_l"
     if "vit_h" in name:
         return "vit_h"
-    return "vit_h"
-
+    return "vit_h" 
 
 # ---------------------------
 # Manifest reading
@@ -105,7 +107,6 @@ def _resolve_path(p: str) -> Path:
     If you later change stage 1 to write absolute paths, this still works.
     """
     return Path(p).expanduser()
-
 
 # ---------------------------
 # Globbing fallback (no manifest)
@@ -185,6 +186,10 @@ def main():
         help="Optional JSONL manifest from stage1 (recommended): out_root/indexes/manifest.jsonl",
     )
     ap.add_argument("--limit", type=int, default=None, help="Optional limit #instances")
+    ap.add_argument("--prompt_mode", choices=["centroid", "box", "random_point"], default="centroid", 
+                    help="Prompting strategy for SAM.")
+    ap.add_argument("--n_points", type=int, default=1, help="Number of points to sample (if prompt_mode=random_point)")
+    
     args = ap.parse_args()
 
     out_root = Path(args.out_root)
@@ -196,7 +201,12 @@ def main():
     overlays_dir.mkdir(parents=True, exist_ok=True)
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
-    model_type = args.sam_model_type or infer_sam_model_type_from_ckpt(args.sam_ckpt)
+    model_type = args.sam_model_type
+    if not model_type:
+        model_type = infer_sam_model_type_from_ckpt(args.sam_ckpt)
+    if not model_type:
+        model_type = "vit_h"  # Safe default
+        
     print(f"SAM ckpt={args.sam_ckpt} | model_type={model_type} | device={args.device or 'auto'}")
 
     # Build worklist
@@ -234,7 +244,7 @@ def main():
             "No (orig, frag, mask) triples found. Provide --manifest or check out_root structure."
         )
 
-    print(f"Found {len(work)} instances to run.")
+    print(f"Found {len(work)} instances to run. Prompt Mode: {args.prompt_mode.upper()}")
 
     # Run SAM
     rows_out: List[Dict[str, object]] = []
@@ -249,9 +259,10 @@ def main():
             gt_mask_path=str(mask_p),
             out_dir=str(overlays_dir),
             sam_checkpoint=args.sam_ckpt,
-            model_type=model_type,
+            model_type=model_type,  # <--- FIXED: Use the inferred variable, not args
             device=args.device,
-            outline_img_path=str(outline_p) if outline_p.exists() else None,
+            prompt_mode=args.prompt_mode,
+            n_points=args.n_points 
         )
 
         rows_out.append(
@@ -265,6 +276,10 @@ def main():
                 "chance_iou": res["chance_iou"],
                 "niou_orig": res.get("niou_orig", None),
                 "niou_frag": res.get("niou_frag", None),
+                "oracle_iou_orig": res["oracle_iou_orig"],
+                "oracle_iou_frag": res["oracle_iou_frag"],
+                "ari_orig": res["ari_orig"],
+                "ari_frag": res["ari_frag"],
                 "score_orig": res["score_orig"],
                 "score_frag": res["score_frag"],
             }
@@ -275,25 +290,21 @@ def main():
 
     # Save CSV
     csv_path = metrics_dir / "sam_iou.csv"
+    
+    # Columns including new Oracle and ARI
+    fieldnames = [
+        "stem", "orig_img", "frag_img", "gt_mask",
+        "iou_orig", "iou_frag", 
+        "chance_iou", "niou_orig", "niou_frag",
+        "oracle_iou_orig", "oracle_iou_frag",
+        "ari_orig", "ari_frag",
+        "score_orig", "score_frag"
+    ]
+
     with open(csv_path, "w", newline="") as f:
-        w = csv.DictWriter(
-            f,
-            fieldnames=[
-                "stem",
-                "orig_img",
-                "frag_img",
-                "gt_mask",
-                "iou_orig",
-                "iou_frag",
-                "chance_iou",
-                "niou_orig",
-                "niou_frag",
-                "score_orig",
-                "score_frag",
-            ],
-        )
-        w.writeheader()
-        w.writerows(rows_out)
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows_out)
 
     print("\nStage2 complete.")
     print(f"Overlays/panels -> {overlays_dir}")
