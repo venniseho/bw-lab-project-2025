@@ -69,14 +69,14 @@ def main():
         # -------------------
         # Stage 1: stimuli
         # -------------------
-        # run_cmd([
-        #     "python3", "make_stimuli.py",
-        #     "--coco_ann", args.coco_ann,
-        #     "--coco_imgdir", args.coco_imgdir,
-        #     "--out_root", str(exp_dir),
-        #     "--limit", str(args.limit),
-        #     "--noise_count", str(nc),
-        # ])
+        run_cmd([
+            "python3", "make_stimuli.py",
+            "--coco_ann", args.coco_ann,
+            "--coco_imgdir", args.coco_imgdir,
+            "--out_root", str(exp_dir),
+            "--limit", str(args.limit),
+            "--noise_count", str(nc),
+        ])
 
         if not manifest.exists():
             raise SystemExit(f"Missing manifest after Stage1: {manifest}")

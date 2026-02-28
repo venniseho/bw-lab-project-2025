@@ -101,7 +101,7 @@ def main():
     base_out.mkdir(parents=True, exist_ok=True)
     
     results = []
-
+    loop1 = True
     # --- 1. Run Experiments Loop ---
     for n in sweep_points:
         print(f"\n{'='*40}\nSTARTING EXPERIMENT FOR N={n} POINTS\n{'='*40}")
@@ -110,15 +110,17 @@ def main():
         exp_name = f"run_n{n}"
         out_root = base_out / exp_name
         
-        # Step A: Generate Stimuli
-        run_cmd([
-            "python3", "make_stimuli.py",
-            "--coco_ann", args.coco_ann,
-            "--coco_imgdir", args.coco_imgdir,
-            "--out_root", str(out_root),
-            "--limit", args.limit,
-            "--noise_count", "300"
-        ])
+        if loop1:
+            # Step A: Generate Stimuli
+            run_cmd([
+                "python3", "make_stimuli.py",
+                "--coco_ann", args.coco_ann,
+                "--coco_imgdir", args.coco_imgdir,
+                "--out_root", str(out_root),
+                "--limit", args.limit,
+                "--noise_count", "200"
+            ])
+            loop1 = False
 
         # Step B: Run SAM (Multi-point)
         run_cmd([

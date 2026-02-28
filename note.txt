@@ -12,9 +12,18 @@ dependencies
 - SAM checkpoints
 - pycocotools 
 - segment_anything
-- opencv-python
+- opencv-python < 4.10.0
+      --> numpy 1.26.4
 - torchvision
 - scikit-image
+- SAM 3 (huggingface)
+      --> python3 -c "from huggingface_hub import login; login()"
+      --> pip install git+https://github.com/facebookresearch/sam3.git
+      --> pip install transformers accelerate pillow
+
+      maybe not:
+      --> pip install setuptools==70.0.0
+      --> einops, decord, psutil
 
 # running slurm
 salloc -p hovennis --gres=gpu:1 --mem=16G --cpus-per-task=4 --time=01:00:00

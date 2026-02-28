@@ -52,13 +52,15 @@ from sam_runner import run_sam_on_pair
 
 def infer_sam_model_type_from_ckpt(ckpt_path: str) -> str:
     name = Path(ckpt_path).name.lower()
+    if "sam3" in name:         
+        return "sam3"          
     if "vit_b" in name:
         return "vit_b"
     if "vit_l" in name:
         return "vit_l"
     if "vit_h" in name:
         return "vit_h"
-    return "vit_h" 
+    return "vit_h"
 
 # ---------------------------
 # Manifest reading
@@ -177,7 +179,7 @@ def main():
         help="Stage1 output root (contains assets/, stimuli/, indexes/...)",
     )
     ap.add_argument("--sam_ckpt", type=str, required=True, help="Path to SAM checkpoint (.pth)")
-    ap.add_argument("--sam_model_type", type=str, default=None, choices=[None, "vit_h", "vit_l", "vit_b"])
+    ap.add_argument("--sam_model_type", type=str, default=None, choices=[None, "vit_h", "vit_l", "vit_b", "sam3"]) 
     ap.add_argument("--device", type=str, default=None, help="cuda or cpu (default: auto)")
     ap.add_argument(
         "--manifest",
@@ -282,6 +284,8 @@ def main():
                 "ari_frag": res["ari_frag"],
                 "score_orig": res["score_orig"],
                 "score_frag": res["score_frag"],
+                "model_idx_frag": res.get("model_idx_frag", 0),
+                "oracle_idx_frag": res.get("oracle_idx_frag", 0),
             }
         )
 
@@ -298,7 +302,8 @@ def main():
         "chance_iou", "niou_orig", "niou_frag",
         "oracle_iou_orig", "oracle_iou_frag",
         "ari_orig", "ari_frag",
-        "score_orig", "score_frag"
+        "score_orig", "score_frag",
+        "model_idx_frag", "oracle_idx_frag"
     ]
 
     with open(csv_path, "w", newline="") as f:

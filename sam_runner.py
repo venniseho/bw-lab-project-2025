@@ -31,6 +31,10 @@ import torch
 from segment_anything import sam_model_registry, SamPredictor
 from sklearn.metrics import adjusted_rand_score
 
+"""
+Sam3Tracker performs Promptable Visual Segmentation (PVS) on images, taking interactive visual prompts (points, boxes, masks) to segment a specific object instance per prompt. It is an updated version of SAM2 that maintains the same API while providing improved performance, making it a drop-in replacement for SAM2 workflows.
+"""
+from transformers import Sam3TrackerProcessor, Sam3TrackerModel
 
 # ------------------------------------------------------------
 # Global SAM state
@@ -55,12 +59,17 @@ def init_sam(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     _DEVICE = device
+    
+    if model_type == "sam3":
+        # Load stable HF version
+        _SAM = Sam3TrackerModel.from_pretrained("facebook/sam3").to(_DEVICE)
+        _PREDICTOR = Sam3TrackerProcessor.from_pretrained("facebook/sam3")
+    else:
+        # Standard SAM 1 fallback
+        _SAM = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+        _SAM.to(device=device)
+        _PREDICTOR = SamPredictor(_SAM)
 
-    sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
-    sam.to(device=device)
-
-    _SAM = sam
-    _PREDICTOR = SamPredictor(sam)
     _SAM_CKPT = sam_checkpoint
     _SAM_TYPE = model_type
 
@@ -122,15 +131,11 @@ def segment_with_sam_versatile(
     prompt_mode: str = "centroid", 
     n_points: int = 1,  
 ):
-    """
-    Runs SAM prediction with flexible prompting.
-    Modes: 'centroid', 'box', 'random_point' (supports n_points)
-    """
     assert _PREDICTOR is not None, "call init_sam(...) first"
 
     H, W = image_bgr.shape[:2]
     image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-    _PREDICTOR.set_image(image_rgb)
+    # _PREDICTOR.set_image(image_rgb)
 
     # --- 1. Generate Prompt ---
     point_coords = None
@@ -140,9 +145,10 @@ def segment_with_sam_versatile(
 
     ys, xs = np.where(gt_mask_u8 > 0)
     
-    # Handle empty masks gracefully
     if xs.size == 0:
-        return None, None, 0.0, {"oracle_iou": 0.0, "ari": 0.0, "model_iou": 0.0}
+        # Return empty structure compatible with new signature
+        empty_stats = {"oracle_iou": 0.0, "ari": 0.0, "model_iou": 0.0, "model_idx": 0, "oracle_idx": 0}
+        return None, None, None, 0.0, empty_stats, [], [], []
 
     if prompt_mode == "box":
         x_min, x_max = xs.min(), xs.max()
@@ -151,65 +157,98 @@ def segment_with_sam_versatile(
         prompt_vis = box
 
     elif prompt_mode == "random_point":
-        # Sample N unique points if possible
         count = min(len(xs), n_points)
         indices = random.sample(range(len(xs)), count)
-        
         coords = []
         labels = []
         vis_points = []
-        
         for idx in indices:
             cx, cy = float(xs[idx]), float(ys[idx])
             coords.append([cx, cy])
-            labels.append(1) # 1 = foreground point
+            labels.append(1) 
             vis_points.append((cx, cy))
-            
         point_coords = np.array(coords, dtype=np.float32)
         point_labels = np.array(labels, dtype=np.int32)
         prompt_vis = vis_points
 
-    else: # Default: Centroid (Single Point)
+    else: # Centroid
         cx, cy = float(xs.mean()), float(ys.mean())
         point_coords = np.array([[cx, cy]], dtype=np.float32)
         point_labels = np.array([1], dtype=np.int32)
         prompt_vis = [(cx, cy)]
 
     # --- 2. Predict ---
-    masks, scores, _ = _PREDICTOR.predict(
-        point_coords=point_coords,
-        point_labels=point_labels,
-        box=box,
-        multimask_output=True, 
-    )
+    if _SAM_TYPE == "sam3":
+        # Prepare inputs for Transformers API (expects 4D inputs: [batch, objects, points, xy])
+        # We use [1, 1, N, 2] for a single image/single object inference
+        in_pts = [[point_coords.tolist()]] if point_coords is not None else None
+        in_lbs = [[point_labels.tolist()]] if point_labels is not None else None
+        in_boxes = [[box.tolist()]] if box is not None else None
 
-    if masks is None or len(masks) == 0:
-         return None, None, 0.0, {"oracle_iou": 0.0, "ari": 0.0, "model_iou": 0.0}
+        inputs = _PREDICTOR(
+            images=image_rgb, 
+            input_points=in_pts, 
+            input_labels=in_lbs, 
+            input_boxes=in_boxes, 
+            return_tensors="pt"
+        ).to(_DEVICE)
+
+        with torch.no_grad():
+            outputs = _SAM(**inputs, multimask_output=True)
+
+        # Post-process to original resolution
+        masks_post = _PREDICTOR.post_process_masks(outputs.pred_masks.cpu(), inputs["original_sizes"])
+        
+        # Pull out the first batch, first object results
+        masks = masks_post[0][0].numpy()  # Results in [3, H, W]
+        scores = outputs.iou_scores[0][0].cpu().numpy() # Results in [3]
+    else:
+        # Standard SAM 1 logic
+        _PREDICTOR.set_image(image_rgb)
+        masks, scores, _ = _PREDICTOR.predict(
+            point_coords=point_coords,
+            point_labels=point_labels,
+            box=box,
+            multimask_output=True, 
+        )
+    # masks, scores, _ = _PREDICTOR.predict(
+    #     point_coords=point_coords,
+    #     point_labels=point_labels,
+    #     box=box,
+    #     multimask_output=True, 
+    # )
+
+    # if masks is None or len(masks) == 0:
+    #      empty_stats = {"oracle_iou": 0.0, "ari": 0.0, "model_iou": 0.0, "model_idx": 0, "oracle_idx": 0}
+    #      return None, None, None, 0.0, empty_stats, [], [], []
 
     # --- 3. Evaluation ---
     gt_bool = gt_mask_u8 > 0
     ious = [_iou_bool(gt_bool, m) for m in masks]
     
-    # Model Selection
+    # Model Selection (Highest Score)
     model_idx = int(np.argmax(scores))
     pred_mask = masks[model_idx].astype(bool)
     pred_score = float(scores[model_idx])
     model_iou = ious[model_idx]
 
-    # Oracle Selection
+    # Oracle Selection (Highest IoU)
     oracle_idx = int(np.argmax(ious))
+    oracle_mask = masks[oracle_idx].astype(bool)
     oracle_iou = float(ious[oracle_idx])
     
-    # ARI
     ari = compute_ari(gt_mask_u8, pred_mask)
 
     extra_stats = {
         "model_iou": model_iou,
         "oracle_iou": oracle_iou,
         "ari": ari,
+        "model_idx": model_idx,
+        "oracle_idx": oracle_idx
     }
 
-    return pred_mask, prompt_vis, pred_score, extra_stats
+    # RETURN EVERYTHING: Best Mask, Oracle Mask, Visuals, Score, Stats, ALL Masks, ALL Scores, ALL IoUs
+    return pred_mask, oracle_mask, prompt_vis, pred_score, extra_stats, masks, scores, ious
 
 # ------------------------------------------------------------
 # Visualization Helper
@@ -219,27 +258,24 @@ def overlay_vis(
     pred_bool: np.ndarray | None,
     gt_mask_u8: np.ndarray | None,
     prompt_vis: Any,
-    prompt_mode: str
+    prompt_mode: str,
+    color=(255, 255, 0) # Default Cyan
 ) -> np.ndarray:
-    """
-    Draws GT (red), Pred (cyan), and Prompt (blue point or box).
-    """
     out = image_bgr.copy()
-
-    # GT
+    
+    # GT (Red)
     if gt_mask_u8 is not None:
         gt_bool = gt_mask_u8 > 0
         if np.any(gt_bool):
             ov = out.copy()
-            ov[gt_bool] = (0, 0, 255) # Red
+            ov[gt_bool] = (0, 0, 255)
             out = cv2.addWeighted(ov, 0.25, out, 0.75, 0)
 
-    # Pred
-    if pred_bool is not None:
-        if np.any(pred_bool):
-            ov = out.copy()
-            ov[pred_bool] = (255, 255, 0) # Cyan
-            out = cv2.addWeighted(ov, 0.35, out, 0.65, 0)
+    # Pred (Custom Color)
+    if pred_bool is not None and np.any(pred_bool):
+        ov = out.copy()
+        ov[pred_bool] = color
+        out = cv2.addWeighted(ov, 0.45, out, 0.55, 0)
 
     # Prompt
     if prompt_vis is not None:
@@ -247,13 +283,11 @@ def overlay_vis(
             x1, y1, x2, y2 = prompt_vis.astype(int)
             cv2.rectangle(out, (x1, y1), (x2, y2), (255, 0, 0), 2)
         else:
-            # Handle both single tuple (cx, cy) and list of tuples [(cx, cy), ...]
             points = prompt_vis if isinstance(prompt_vis, list) else [prompt_vis]
             for pt in points:
                 cx, cy = pt
-                cv2.circle(out, (int(cx), int(cy)), 6, (255, 0, 0), -1)
-                cv2.circle(out, (int(cx), int(cy)), 3, (255, 255, 255), -1)
-
+                cv2.circle(out, (int(cx), int(cy)), 4, (255, 0, 0), -1)
+                cv2.circle(out, (int(cx), int(cy)), 2, (255, 255, 255), -1)
     return out
 
 def mask_outline_image(mask_u8: np.ndarray, size_hw: Tuple[int, int], color=(255, 255, 255), thickness: int = 2) -> np.ndarray:
@@ -302,6 +336,99 @@ def make_panel_3x2(
     row2 = np.hstack([ov_orig_r, ov_frag, gt_outline])
     
     return np.vstack([row1, row2])
+
+def make_oracle_panel(
+    frag_bgr: np.ndarray,
+    model_mask: np.ndarray,
+    oracle_mask: np.ndarray,
+    gt_mask: np.ndarray,
+    prompt_vis: Any,
+    prompt_mode: str,
+    stats: Dict[str, float],
+    score: float
+) -> np.ndarray:
+    """
+    Creates a comparison panel:
+    [ SAM Choice (Cyan) ]  |  [ Oracle Choice (Green) ]
+    Includes text stats.
+    """
+    H, W = frag_bgr.shape[:2]
+    
+    # Left: Model Choice (Cyan)
+    vis_model = overlay_vis(frag_bgr, model_mask, gt_mask, prompt_vis, prompt_mode, color=(255, 255, 0))
+    
+    # Right: Oracle Choice (Green)
+    vis_oracle = overlay_vis(frag_bgr, oracle_mask, gt_mask, prompt_vis, prompt_mode, color=(0, 255, 0))
+    
+    # Stack Side by Side
+    panel = np.hstack([vis_model, vis_oracle])
+    
+    # Add Text Overlay
+    text_lines = [
+        f"SAM Conf: {score:.3f} | Model IoU: {stats['model_iou']:.3f}",
+        f"Oracle IoU: {stats['oracle_iou']:.3f} | ARI: {stats['ari']:.3f}"
+    ]
+    
+    # Draw text background
+    ph = 60
+    header = np.zeros((ph, panel.shape[1], 3), dtype=np.uint8)
+    
+    cv2.putText(header, "LEFT: SAM Choice (Cyan)", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+    cv2.putText(header, "RIGHT: Oracle Best (Green)", (W + 10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    
+    cv2.putText(header, text_lines[0], (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+    cv2.putText(header, text_lines[1], (W + 10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+    
+    return np.vstack([header, panel])
+
+def make_5_panel_debug(
+    image_bgr: np.ndarray,
+    masks: np.ndarray,
+    scores: np.ndarray,
+    ious: List[float],
+    gt_mask: np.ndarray,
+    prompt_vis: Any,
+    prompt_mode: str,
+    model_idx: int,
+    oracle_idx: int
+) -> np.ndarray:
+    """
+    Creates a 5-column panel:
+    [Mask 0] [Mask 1] [Mask 2] [SAM Choice] [Oracle Choice]
+    """
+    panels = []
+
+    # 1. Generate panels for the 3 raw masks
+    for i in range(3):
+        # Handle case if SAM returns fewer than 3 masks
+        if i < len(masks):
+            m = masks[i]
+            s = scores[i]
+            iou = ious[i]
+            
+            # Color logic: Purple for raw candidates
+            vis = overlay_vis(image_bgr, m, gt_mask, prompt_vis, prompt_mode, color=(255, 0, 255))
+            
+            # Add text
+            header = f"M{i} | Conf: {s:.2f} | IoU: {iou:.2f}"
+            cv2.putText(vis, header, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            panels.append(vis)
+        else:
+            panels.append(np.zeros_like(image_bgr))
+
+    # 2. SAM Choice Panel (Cyan)
+    sam_mask = masks[model_idx]
+    vis_sam = overlay_vis(image_bgr, sam_mask, gt_mask, prompt_vis, prompt_mode, color=(255, 255, 0))
+    cv2.putText(vis_sam, f"SAM Choice (M{model_idx})", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+    panels.append(vis_sam)
+
+    # 3. Oracle Choice Panel (Green)
+    oracle_mask = masks[oracle_idx]
+    vis_oracle = overlay_vis(image_bgr, oracle_mask, gt_mask, prompt_vis, prompt_mode, color=(0, 255, 0))
+    cv2.putText(vis_oracle, f"Oracle Best (M{oracle_idx})", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    panels.append(vis_oracle)
+
+    return np.hstack(panels)
 # ------------------------------------------------------------
 # Main Wrapper
 # ------------------------------------------------------------
@@ -315,7 +442,7 @@ def run_sam_on_pair(
     model_type: str = "vit_h",
     device: str | None = None,
     prompt_mode: str = "centroid",
-    n_points: int = 1, 
+    n_points: int = 1,
     outline_img_path: str | None = None,
 ):
     init_sam(sam_checkpoint, model_type=model_type, device=device)
@@ -324,62 +451,72 @@ def run_sam_on_pair(
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = Path(frag_img_path).stem.replace("_fragmented", "")
 
-    # Load
+    # Load images
     orig = cv2.imread(orig_img_path)
     frag = cv2.imread(frag_img_path)
     gt_mask_full = cv2.imread(gt_mask_path, cv2.IMREAD_GRAYSCALE)
 
     if orig is None or frag is None or gt_mask_full is None:
-        print(f"⚠ SAM: missing file(s) for {stem}")
         return None
 
-    # Resize GT to match
+    # Resize GT
     H, W = orig.shape[:2]
     gt_orig = cv2.resize(gt_mask_full, (W, H), interpolation=cv2.INTER_NEAREST)
     Hf, Wf = frag.shape[:2]
     gt_frag = cv2.resize(gt_mask_full, (Wf, Hf), interpolation=cv2.INTER_NEAREST)
 
     # --- Run SAM on Original ---
-    seg_o, p_vis_o, score_o, stats_o = segment_with_sam_versatile(
+    seg_o, _, p_vis_o, score_o, stats_o, _, _, _ = segment_with_sam_versatile(
         orig, gt_orig, prompt_mode=prompt_mode, n_points=n_points
     )
     
     # --- Run SAM on Fragmented ---
-    seg_f, p_vis_f, score_f, stats_f = segment_with_sam_versatile(
+    seg_f, oracle_f, p_vis_f, score_f, stats_f, all_masks, all_scores, all_ious = segment_with_sam_versatile(
         frag, gt_frag, prompt_mode=prompt_mode, n_points=n_points
     )
 
-    # Visuals
+    # --- Generate 5-GRID Debug Panel ---
+    if seg_f is not None:
+        panel_5 = make_5_panel_debug(
+            image_bgr=frag,
+            masks=all_masks,
+            scores=all_scores,
+            ious=all_ious,
+            gt_mask=gt_frag,
+            prompt_vis=p_vis_f,
+            prompt_mode=prompt_mode,
+            model_idx=stats_f["model_idx"],
+            oracle_idx=stats_f["oracle_idx"]
+        )
+        # Save as a wide image
+        cv2.imwrite(str(out_dir / f"{stem}_debug_5grid.png"), panel_5)
+
+    # Standard Overlays
     ov_orig = overlay_vis(orig, seg_o, gt_orig, p_vis_o, prompt_mode)
     ov_frag = overlay_vis(frag, seg_f, gt_frag, p_vis_f, prompt_mode)
-    
-    panel_3x2 = make_panel_3x2(orig, frag, gt_mask_full, ov_orig, ov_frag)
-    cv2.imwrite(str(out_dir / f"{stem}_panel_3x2.png"), panel_3x2)
-    
     cv2.imwrite(str(out_dir / f"{stem}_sam_orig.png"), ov_orig)
     cv2.imwrite(str(out_dir / f"{stem}_sam_frag.png"), ov_frag)
 
-    # --- Metrics ---
+    # Metrics
     chance = chance_iou_full_image(gt_frag)
     niou_orig = normalized_iou(stats_o["model_iou"], chance)
     niou_frag = normalized_iou(stats_f["model_iou"], chance)
 
     return {
         "stem": stem,
-        # Standard IoU (Model selected)
         "iou_orig": stats_o["model_iou"],
         "iou_frag": stats_f["model_iou"],
-        # Baselines
         "chance_iou": chance,
         "niou_orig": niou_orig,
         "niou_frag": niou_frag,
-        # Oracle IoU (Best of 3)
         "oracle_iou_orig": stats_o["oracle_iou"],
         "oracle_iou_frag": stats_f["oracle_iou"],
-        # Adjusted Rand Index
         "ari_orig": stats_o["ari"],
         "ari_frag": stats_f["ari"],
-        # Confidence Score
         "score_orig": score_o,
         "score_frag": score_f,
+        
+        # Save masks and indices for further analysis
+        "model_idx_frag": stats_f["model_idx"],
+        "oracle_idx_frag": stats_f["oracle_idx"],
     }

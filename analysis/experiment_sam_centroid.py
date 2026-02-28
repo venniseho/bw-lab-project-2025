@@ -30,7 +30,7 @@ def main():
         "--coco_imgdir", args.coco_imgdir,
         "--out_root", str(out_root),
         "--limit", args.limit,
-        "--noise_count", "300"
+        "--noise_count", "200"
     ])
 
     # 3. Stage 1.5: Verify Stats (No Local Cues)
