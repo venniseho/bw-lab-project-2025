@@ -24,6 +24,7 @@ checkpoints/
 COCO/
 datasets/
 data/
+data_input/
 
 # Outputs / results
 outputs/
