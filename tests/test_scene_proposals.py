@@ -77,7 +77,10 @@ class SceneTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / 'scene'
             report = save_scene(self.rgb, self.proposals, retained, rows, root, stats)
-            self.assertEqual(len(list((root / 'candidates').glob('*.png'))), 12)
+            self.assertEqual(len(list((root / 'candidates').glob('proposal_?????.png'))), 12)
+            self.assertEqual(len(list((root / 'candidates').glob('*_overlay.png'))), 12)
+            self.assertEqual(len(list((root / 'retained').glob('*.png'))), 2)
+            self.assertTrue((root / 'raw_all_proposals_overlay.png').is_file())
             self.assertTrue((root / 'contact_sheet.png').is_file())
             np.testing.assert_array_equal(np.asarray(Image.open(root / 'original.png')), before)
             mask = np.asarray(Image.open(root / report['proposals'][0]['mask_file']))
@@ -138,12 +141,16 @@ class SceneTests(unittest.TestCase):
             with patch.dict(os.environ, {'SLURM_JOB_ID': 'mock', 'SLURM_STEP_ID': '0'}), \
                  patch.dict(sys.modules, {'torch': torch}), \
                  patch('scripts.sam3_scene_masks.load_predictor', return_value=(predictor, {'api': 'mock'})):
-                main(['--image-dir', str(images), '--limit-images', '7', '--points-per-side', '1',
+                main(['--image-dir', str(images), '--limit-images', '7',
                       '--checkpoint', str(checkpoint), '--output-dir', str(root / 'output')])
             manifest = json.loads((root / 'output/run.json').read_text())
             self.assertEqual(manifest['status'], 'complete')
             self.assertEqual(len(manifest['completed_images']), 7)
             self.assertEqual(predictor.embeddings, 7)
+            self.assertEqual(len(predictor.points), 7 * 9)
+            first = json.loads((root / 'output/00_0/metadata.json').read_text())
+            self.assertEqual(first['raw_proposal_count'], 27)
+            self.assertEqual(first['raw_masks_saved_count'], 27)
             self.assertEqual(len(list((root / 'output').glob('*/contact_sheet.png'))), 7)
 
     def test_cli_login_node_rejected_before_gpu_import(self):
@@ -153,6 +160,13 @@ class SceneTests(unittest.TestCase):
             Image.fromarray(self.rgb).save(image)
             with patch.dict(os.environ, {}, clear=True), self.assertRaises(RuntimeError):
                 main(['--image', str(image)])
+
+    def test_three_by_three_grid_multimask(self):
+        predictor = FakePredictor()
+        proposals, stats = collect_proposals(predictor, self.rgb, 3)
+        self.assertEqual(stats['grid_point_count'], 9)
+        self.assertEqual(len(proposals), 27)
+        self.assertEqual(len(predictor.points), 9)
 
 
 if __name__ == '__main__':

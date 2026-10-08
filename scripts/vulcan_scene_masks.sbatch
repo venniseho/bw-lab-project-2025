@@ -28,4 +28,5 @@ export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 output="/scratch/vho/sam3-whole-scene/results/job_${SLURM_JOB_ID}"
 mkdir -p "$(dirname "$output")"
 srun python scripts/sam3_scene_masks.py --image-dir "$images" \
-    --checkpoint "$checkpoint" --output-dir "$output" "$@"
+    --checkpoint "$checkpoint" --output-dir "$output" \
+    --points-per-side 3 --limit-images 1 "$@"

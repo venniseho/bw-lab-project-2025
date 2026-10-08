@@ -1,5 +1,7 @@
 # Automatic whole-scene SAM3 visual proposals
 
+For the current 3x3 one-image setup, use [Vulcan setup instructions](vulcan_scene_setup.md). The cluster commands below are historical examples with unverified paths; the linked setup replaces them.
+
 This is automatic **point-grid prompting**, not inherently prompt-free SAM3 inference. No text/concept queries are used. No turnkey class-agnostic automatic mask generator was found in the inspected [Meta SAM3 API](https://github.com/facebookresearch/sam3). The official [interactive predictor](https://github.com/facebookresearch/sam3/blob/main/sam3/model/sam1_task_predictor.py) supports `set_image(RGB)` once, followed by independent positive-point `predict` calls with `multimask_output=True`. The grid is never passed as multiple positive points for one object.
 
 The native [image builder](https://github.com/facebookresearch/sam3/blob/main/sam3/model_builder.py) requires `enable_inst_interactivity=True`. This script loads an existing native SAM3 `sam3.pt`, disables downloads, and rejects missing checkpoint keys rather than accepting randomly initialized components. It uses Meta's native implementation, whereas the previous single-point smoke script uses Hugging Face's tracker. Numerical equivalence between these implementations has not been established. SAM3.1 and HF safetensors are not interchangeable checkpoint inputs here.
@@ -51,7 +53,7 @@ Ensure the cluster checkout includes this commit (normal Git fetch/checkout on y
 
 ```bash
 sbatch "$REPO/scripts/vulcan_scene_masks.sbatch" "$REPO" "$VENV" "$CHECKPOINT" "$IMAGES"
-# Default: first image in filename order, 4x4 independent grid, all raw masks archived.
+# Default: first image in filename order, 3x3 independent grid, all raw masks archived.
 squeue -u vho
 # Replace JOBID with sbatch's returned job number:
 tail -f /scratch/vho/sam3-whole-scene/logs/sam3-scene-JOBID.out

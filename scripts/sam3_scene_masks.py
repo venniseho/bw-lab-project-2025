@@ -88,7 +88,7 @@ def main(argv=None):
     parser.add_argument("--checkpoint", type=Path, help="Local native Meta sam3.pt, not HF safetensors")
     parser.add_argument("--bpe-path", type=Path)
     parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--points-per-side", type=int, default=4)
+    parser.add_argument("--points-per-side", type=int, default=3)
     parser.add_argument("--proposal-limit", type=int, default=100)
     parser.add_argument("--save-candidate-limit", type=int)
     parser.add_argument("--min-score", type=float)
