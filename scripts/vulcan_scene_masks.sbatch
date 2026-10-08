@@ -22,6 +22,7 @@ checkpoint=$(realpath "$3")
 images=$(realpath "$4")
 shift 4
 [[ -f "$venv/bin/activate" && -f "$checkpoint" && -d "$images" ]]
+module load python/3.12.4
 source "$venv/bin/activate"
 cd "$repo"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"

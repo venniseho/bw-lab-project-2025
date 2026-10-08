@@ -38,9 +38,9 @@ def point_grid(height: int, width: int, points_per_side: int) -> np.ndarray:
     return np.stack((x.ravel(), y.ravel()), axis=1)
 
 
-def collect_proposals(predictor, rgb: np.ndarray, points_per_side: int,
+def collect_proposals(model, processor, rgb: np.ndarray, points_per_side: int,
                       synchronize=lambda: None) -> tuple[list[Proposal], dict]:
-    """Use Meta's set_image/predict API; cache one embedding per image.
+    """Use Sam3Processor.set_image then Sam3Image.predict_inst with cached state.
 
     Query one positive point at a time, never combine the grid as prompts for
     one object. Keep every returned candidate, including empty/low-score masks.
@@ -52,7 +52,15 @@ def collect_proposals(predictor, rgb: np.ndarray, points_per_side: int,
     points = point_grid(height, width, points_per_side)
     synchronize()
     start = time.perf_counter()
-    predictor.set_image(rgb)
+    # PIL is required here: Meta's processor reads ndarray shape[-2:], which
+    # would interpret an HWC RGB array's width/channel dimensions as H/W.
+    inference_state = processor.set_image(Image.fromarray(rgb))
+    if (not isinstance(inference_state, dict)
+            or inference_state.get("original_height") != height
+            or inference_state.get("original_width") != width
+            or "sam2_backbone_out" not in inference_state.get("backbone_out", {})):
+        raise RuntimeError("Meta processor did not return aligned interactive image features; "
+                           "check installed SAM3 API and enable_inst_interactivity=True")
     synchronize()
     embedding_seconds = time.perf_counter() - start
     proposals = []
@@ -60,7 +68,8 @@ def collect_proposals(predictor, rgb: np.ndarray, points_per_side: int,
     for point_index, point in enumerate(points):
         synchronize()
         query_start = time.perf_counter()
-        masks, scores, _low_resolution_logits = predictor.predict(
+        masks, scores, _low_resolution_logits = model.predict_inst(
+            inference_state,
             point_coords=point[None, :], point_labels=np.array([1], dtype=np.int32),
             multimask_output=True, return_logits=False, normalize_coords=True,
         )

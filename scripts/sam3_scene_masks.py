@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 from scene_segmentation.proposals import collect_proposals, select_proposals, save_scene
 from scripts.sam3_smoke_test import load_rgb, file_fingerprint, require_slurm_step
+
+VERIFIED_SAM3_API_REVISION = "0570b3a5be9c4e694f23d85232fb55f4a6f1f7fc"
 
 
 def checked_state(model, state):
@@ -34,10 +37,40 @@ def checked_state(model, state):
     return list(result.unexpected_keys)
 
 
-def load_predictor(checkpoint, bpe_path, torch):
+def validate_scene_api(model, processor):
+    """Check the installed API; refuse incompatible signatures or cleanup defaults."""
+    interactive = getattr(model, "inst_interactive_predictor", None)
+    transforms = getattr(interactive, "_transforms", None)
+    if (not callable(getattr(model, "predict_inst", None))
+            or not callable(getattr(processor, "set_image", None))
+            or not callable(getattr(interactive, "predict", None))
+            or not hasattr(interactive, "mask_threshold")
+            or any(not hasattr(transforms, name) for name in
+                   ("mask_threshold", "max_hole_area", "max_sprinkle_area"))):
+        raise RuntimeError("Installed native SAM3 lacks the required processor/predict_inst API")
+    arguments = dict(point_coords=np.zeros((1, 2), dtype=np.float32),
+                     point_labels=np.ones(1, dtype=np.int32),
+                     multimask_output=True, return_logits=False, normalize_coords=True)
+    try:
+        inspect.signature(processor.set_image).bind(object())
+        inspect.signature(model.predict_inst).bind({}, **arguments)
+        inspect.signature(interactive.predict).bind(**arguments)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("Installed native SAM3 visual API has incompatible signatures") from error
+    # Configure the EXISTING integrated predictor. Never call its set_image:
+    # its tracker intentionally has no backbone; predict_inst supplies features.
+    interactive.mask_threshold = 0.0
+    transforms.mask_threshold = 0.0
+    transforms.max_hole_area = 0.0
+    transforms.max_sprinkle_area = 0.0
+
+
+def load_scene_model(checkpoint, bpe_path, torch):
     import sam3
     import sam3.model_builder as builder
     import sam3.model.sam1_task_predictor as visual
+    import sam3.model.sam3_image_processor as processing
+    import sam3.model.sam3_image as image_model
     bpe = bpe_path or Path(sam3.__file__).parent / "assets/bpe_simple_vocab_16e6.txt.gz"
     if not Path(bpe).is_file():
         raise FileNotFoundError(f"Local tokenizer asset missing: {bpe}")
@@ -46,21 +79,24 @@ def load_predictor(checkpoint, bpe_path, torch):
         load_from_HF=False, enable_inst_interactivity=True, compile=False,
     )
     unexpected = checked_state(model, torch.load(checkpoint, map_location="cpu", weights_only=True))
-    model = model.to(device="cuda", dtype=torch.float32).eval()
+    # Preserve native parameter/buffer dtypes. A blanket float32 cast discards
+    # the imaginary component of registered complex RoPE frequency buffers.
+    model = model.to(device="cuda").eval()
     # Meta's model_builder enables TF32 during import. Override after importing it.
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
-    predictor = visual.SAM3InteractiveImagePredictor(
-        model.inst_interactive_predictor.model, mask_threshold=0.0,
-        max_hole_area=0.0, max_sprinkle_area=0.0,
-    ).eval()
-    return predictor, {
+    processor = processing.Sam3Processor(model, device="cuda")
+    validate_scene_api(model, processor)
+    return model, processor, {
         "checkpoint": file_fingerprint(Path(checkpoint)),
         "builder_source": file_fingerprint(Path(builder.__file__)),
         "predictor_source": file_fingerprint(Path(visual.__file__)),
+        "processor_source": file_fingerprint(Path(processing.__file__)),
+        "image_model_source": file_fingerprint(Path(image_model.__file__)),
         "tokenizer": file_fingerprint(Path(bpe)),
         "unexpected_checkpoint_keys": unexpected,
-        "api": "Meta SAM3InteractiveImagePredictor.set_image/predict",
+        "api": "Meta Sam3Processor.set_image / Sam3Image.predict_inst",
+        "verified_api_revision": VERIFIED_SAM3_API_REVISION,
         "model_family": "SAM3 (not SAM3.1)", "text_queries": False,
         "mask_threshold": 0.0, "max_hole_area": 0.0, "max_sprinkle_area": 0.0,
     }
@@ -120,10 +156,11 @@ def main(argv=None):
     torch.backends.cudnn.allow_tf32 = False
     torch.cuda.synchronize()
     start = time.perf_counter()
-    predictor, model_info = load_predictor(args.checkpoint, args.bpe_path, torch)
+    model, processor, model_info = load_scene_model(args.checkpoint, args.bpe_path, torch)
     torch.cuda.synchronize()
     model_info.update(load_seconds=time.perf_counter() - start, torch_version=torch.__version__,
-                      gpu=torch.cuda.get_device_name(), seed=0, precision="float32, no autocast, TF32 disabled")
+                      gpu=torch.cuda.get_device_name(), seed=0,
+                      precision="native model dtypes preserved; no autocast; TF32 disabled")
     args.output_dir.mkdir(parents=True)
     manifest = {"status": "running", "model": model_info,
                 "workflow_source": file_fingerprint(Path(__file__)),
@@ -139,10 +176,10 @@ def main(argv=None):
         for index, path in enumerate(paths):
             image_start = time.perf_counter()
             rgb = np.asarray(load_rgb(path))
-            predictor.reset_predictor()
             torch.cuda.reset_peak_memory_stats()
             with torch.inference_mode():
-                proposals, timing = collect_proposals(predictor, rgb, args.points_per_side, torch.cuda.synchronize)
+                proposals, timing = collect_proposals(model, processor, rgb, args.points_per_side,
+                                                     torch.cuda.synchronize)
             post_start = time.perf_counter()
             retained, rows, rules = select_proposals(proposals, min_score=args.min_score,
                 dedup_iou=None if args.no_dedup else args.dedup_iou, proposal_limit=args.proposal_limit)

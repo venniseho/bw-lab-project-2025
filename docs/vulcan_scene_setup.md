@@ -2,6 +2,22 @@
 
 Nine positive points are placed automatically; each is an independent visual query with `multimask_output=True`. Typically this yields 27 raw masks; actual output count is recorded. No clicks, text prompts, model replacement or GT-based mask selection. These are qualitative proposals: small objects can be missed, and object parts/background can be proposed.
 
+Following failure of job `1390350`, image features are computed once with `Sam3Processor(model).set_image(PIL_RGB_image)` and reused by nine `model.predict_inst(state, ...)` calls. The integrated tracker has no standalone backbone. Model transfer to CUDA preserves native dtypes; a blanket float32 cast would discard imaginary components of complex rotary-position buffers. The integration was verified against the user's installed Meta source revision [`0570b3a5be9c4e694f23d85232fb55f4a6f1f7fc`](https://github.com/facebookresearch/sam3/tree/0570b3a5be9c4e694f23d85232fb55f4a6f1f7fc), reported at `/project/aip-sven/vho/sam3` (`~/projects/aip-sven/vho/sam3`). Runtime checks inspect installed API signatures and require aligned interactive features; processor and model source hashes are recorded. Local tests mock the native interaction; actual corrected GPU execution has not been performed.
+
+## Update an existing Vulcan checkout without losing the local module edit
+
+The committed batch script now includes `module load python/3.12.4` before venv activation. Preserve your local batch edit before pulling, without resetting/discarding it. Run in the **project checkout**, not the Meta SAM3 source checkout:
+
+```bash
+git status --short
+git diff -- scripts/vulcan_scene_masks.sbatch
+git stash push -m "Preserve Vulcan batch module edit before SAM3 fix" -- scripts/vulcan_scene_masks.sbatch
+git pull --ff-only origin sam3-fragmentation-v2
+grep -n 'module load python/3.12.4' scripts/vulcan_scene_masks.sbatch
+```
+
+The local edit remains saved in the stash, and the updated script already includes that same module load. Do not blindly apply the stash over the incoming fix. If it contains additional edits, inspect `git stash show -p` and reconcile those separately. Stop if the pull cannot fast-forward or other local changes block it. No GPU job is submitted by these commands. Do not update/reinstall Meta SAM3 or replace the checkpoint for this fix.
+
 All raw binary masks and individual RGB overlays are saved, including empty/duplicate/low-score candidates. `retained/` contains masks retained after filtering/deduplication. `raw_all_proposals_overlay.png` shows all raw candidates, `all_proposals_overlay.png` shows retained candidates, and `contact_sheet.png` shows original, retained overlay, and each retained mask. Metadata records original path/checksum, raw/retained counts, all scores/decisions, timings, peak CUDA allocated/reserved bytes, and checkpoint/implementation information. Default retention rules remain unchanged: empty-mask exclusion from retention only, no score threshold, exact binary-mask IoU deduplication >=0.95, descending predicted IoU with raw ID tie-break, retained limit 100. No raw archive limit is used below. Predicted IoU is a quality score, not calibrated object-existence confidence.
 
 ## Verification and proposed layout
@@ -84,6 +100,7 @@ Stop if the clone/update fails, the branch differs, or local changes/divergence 
 If a suitable native Meta SAM3 venv exists, set `VENV` to it and activate. The batch expects `bin/activate`; do not pass a Conda directory as if it were a venv. Otherwise these are **manual installation commands**, not actions already performed. First verify Python >=3.12. If it is unavailable, use `module spider python` to identify and load an available >=3.12 module; its actual name is not verified from this environment.
 
 ```bash
+module load python/3.12.4
 python3 -c 'import sys; assert sys.version_info >= (3,12), "Load Python >=3.12 first"'
 # Continue only after the above succeeds; do not overwrite an existing environment.
 test ! -e "$VENV" && python3 -m venv "$VENV"
