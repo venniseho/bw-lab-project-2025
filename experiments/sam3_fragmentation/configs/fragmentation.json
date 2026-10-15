@@ -1,0 +1,13 @@
+{
+  "manifest": "../../../records.json",
+  "condition": "fragmentation",
+  "subset": "test",
+  "seed": 42,
+  "fragmentation": {
+    "noise_count": 300,
+    "outline_mode": "scan"
+  },
+  "points_per_side": 3,
+  "dedup_iou": null,
+  "checkpoint": null
+}

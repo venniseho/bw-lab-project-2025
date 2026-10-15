@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bwlab-segmentation"
+version = "0.1.0"
+description = "Controlled contour fragmentation and fence occlusion for SAM3 research"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["numpy>=1.26", "pillow>=10.1", "opencv-python", "matplotlib", "torch", "torchvision"]
+
+[project.optional-dependencies]
+coco = ["pycocotools"]
+legacy = ["scikit-image"]
+
+[tool.setuptools.packages.find]
+include = ["bwlab*", "experiments*", "legacy*"]
+
+[tool.setuptools.package-data]
+"experiments.sam3_fragmentation" = ["configs/*.json", "README.md"]
+"legacy.contour_fragmentation" = ["setup_env.sh"]
