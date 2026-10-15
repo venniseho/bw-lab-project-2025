@@ -19,7 +19,7 @@ from bwlab.runner import Runner
 from bwlab.stimuli import FenceOcclusion
 from bwlab.tasks.scene_proposals import SceneProposalTask
 from experiments.sam3_fragmentation.experiment import Config, build_data_module, load_config, prepare, run
-from test_scene_proposals import FakeProcessor, FakeSceneModel
+from tests.helpers import FakeProcessor, FakeSceneModel
 
 
 class ExperimentStructureTests(unittest.TestCase):
@@ -133,7 +133,7 @@ class ExperimentStructureTests(unittest.TestCase):
         self.assertEqual(config.fragmentation.noise_count, 5)
 
     def test_library_never_imports_scripts_experiments_or_compatibility_packages(self):
-        root = Path(__file__).resolve().parents[1] / "bwlab"
+        root = Path(__file__).resolve().parents[2] / "bwlab"
         forbidden = {"scripts", "experiments", "data_selection", "stimuli_generation", "evaluation", "scene_segmentation"}
         for path in root.rglob("*.py"):
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

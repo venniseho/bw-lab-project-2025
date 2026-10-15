@@ -46,8 +46,8 @@ class Config:
     save_candidate_limit: int | None = None
 
 
-def build_data_module(config: Config) -> DataModule:
-    """Experiment owns condition choices; datasets only load and transform."""
+def build_conditions(config: Config) -> dict:
+    """Construct each experimental condition independently."""
     if config.subset not in ("val", "test"):
         raise ValueError("choose val or test explicitly")
     if config.condition == "fence":
@@ -65,6 +65,12 @@ def build_data_module(config: Config) -> DataModule:
         conditions = {"fragmentation": ContourFragmentation(config.fragmentation, config.seed)}
     else:
         raise ValueError("condition must be fence or fragmentation")
+    return conditions
+
+
+def build_data_module(config: Config) -> DataModule:
+    """Wire explicit source data to independently applied stimulus transforms."""
+    conditions = build_conditions(config)
     sources = ManifestDataModule({config.subset: config.manifest}, seed=config.seed or 0)
     original = sources.val_dataset() if config.subset == "val" else sources.test_dataset()
     return DataModule({config.subset: ConditionDataset(original, conditions)}, seed=config.seed or 0)

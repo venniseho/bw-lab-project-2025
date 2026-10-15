@@ -38,7 +38,8 @@ def relabel_scene(scene_dir: Path, output: Path) -> None:
         if int(np.count_nonzero(mask)) != row["area_pixels"]:
             raise ValueError("archived mask area disagrees with metadata")
         retained.append(Proposal(np.packbits(mask != 0), mask.shape, row))
-    sheet = contact_sheet(rgb, all_proposal_overlay(rgb, retained), retained)
+    sheet = contact_sheet(rgb, all_proposal_overlay(rgb, retained), retained,
+                          prompts=report["proposals"], title=report.get("__key__") or report.get("condition"))
     output.parent.mkdir(parents=True, exist_ok=True)
     # Exclusive creation protects an older sheet even if the path appears late.
     with output.open("xb") as target:

@@ -53,7 +53,9 @@ Set `checkpoint` in that reviewed config to the existing native checkpoint,
 `/scratch/vho/sam3-whole-scene/checkpoints/sam3.pt`. Use the existing SAM3
 environment; do not reinstall it. The command submits no job and refuses a
 login-node run. The included configs leave checkpoint null to prevent an
-accidental inference run. No GPU run has been performed for this refactor.
+accidental inference run. The baseline was tested successfully on Vulcan in job 1762018.
+Load `opencv/4.12.0` as well as `python/3.12.4` before activating the existing
+venv; the OpenCV pip placeholder alone does not supply cv2.
 
 Inference creates `config.json` and `predictions/results.json`. Each numbered
 scene archive contains RGB, raw candidate masks, retained masks, clearer contact

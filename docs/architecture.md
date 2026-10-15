@@ -40,7 +40,8 @@ experiments/
     experiment.py               Config, build_data_module, prepare, run
     configs/                    fence and contour JSON examples
     README.md                   experiment commands and output layout
-tests/                          software and integration tests
+tests/{datasets,models,stimuli,tasks}/  tests mirror library responsibilities
+tests/helpers.py                shared native SAM3 test doubles
 legacy/contour_fragmentation/   exact archive source, unchanged
 ```
 
@@ -82,3 +83,7 @@ scheduler launcher. Those components serve reference experiments not yet part
 of the authorized BWLab refactor. The pinned README, library layout, model
 interface, trainer, experiment and launcher were inspected in addition to the
 six originally requested files.
+
+The first validated refactor was merged via PR #3. Follow-up rendering and
+function cleanup is on a new branch based on that updated main. Compatibility
+imports stay available; historical files are not moved or rewritten.
