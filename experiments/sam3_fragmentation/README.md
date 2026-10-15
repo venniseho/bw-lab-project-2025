@@ -67,3 +67,10 @@ The [architecture map](../../docs/architecture.md) explains each layer. Extend
 quantitative metrics and the separate common-visible prompting protocol only
 after approved merge into main. The old natural-image CLI remains available
 for qualitative images without masks.
+
+The [timed ten-image pilot](../../docs/timed_pipeline_pilot.md) provides a
+deterministic archived-pair manifest, a ready SLURM script and timing summaries.
+Runs save `timing.json` plus `predictions/timings.csv`; GPU embedding and query
+measurements use explicit CUDA synchronization. Timing fields overlap and must
+not all be summed. This pilot is an integration/runtime check, not an unbiased
+accuracy evaluation.

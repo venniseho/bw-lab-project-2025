@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+import time
 
 from bwlab.datasets._base import DataModule
 from bwlab.models._base import Model
@@ -38,8 +39,24 @@ class Runner:
         else:
             raise ValueError("evaluation requires an explicit val or test split")
         evaluator = self.task.get_evaluator(output_path)
-        for batch in loader:
-            for sample in batch:
+        for batch, wait_seconds in _timed_batches(loader):
+            for index, sample in enumerate(batch):
+                sample.setdefault("timing", {})["batch_wait_seconds"] = wait_seconds if index == 0 else 0.0
+                start = time.perf_counter()
                 prediction = model.predict(sample["image"])
+                sample["timing"]["inference_wall_seconds"] = time.perf_counter()-start
                 evaluator.update(sample, prediction)
         return evaluator.finalize()
+
+
+def _timed_batches(loader):
+    """Include iterator startup; charge each batch wait to its first sample only."""
+    start = time.perf_counter()
+    iterator = iter(loader)
+    while True:
+        try:
+            batch = next(iterator)
+        except StopIteration:
+            return
+        yield batch, time.perf_counter()-start
+        start = time.perf_counter()

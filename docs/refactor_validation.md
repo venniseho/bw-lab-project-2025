@@ -115,3 +115,17 @@ shared native mocks in `tests/helpers.py`. Two new rendering tests cover scaled
 coordinates/deduplication and points without retained proposals. The follow-up
 suite passed all 95 tests locally in 10.625 seconds; its actual GPU inference path has not been rerun, since
 this follow-up changes rendering/refactoring, not inference or generation rules.
+
+## Timed pilot preparation
+
+The subsequent timing/pilot additions passed all 99 local CPU tests in 12.286
+seconds. Tests cover grouped statistics/CSV output, explicit synchronization
+callbacks at embedding/query boundaries, paired source selection, and measured
+fields/artifacts in the mocked full run. Actual CPU preparation also succeeded
+on the ten selected repository pairs: 40 fence and ten contour inputs, matching
+source sets. Python 3.12 syntax was checked on new modules. The real 50-input
+Vulcan GPU run has not been submitted by the assistant.
+
+Timing measures synchronized wall-clock boundaries, including CPU work where
+documented, not isolated CUDA kernel duration. Refer to the
+[timing boundary guide](timed_pipeline_pilot.md) before adding or comparing fields.

@@ -87,6 +87,11 @@ class ExperimentStructureTests(unittest.TestCase):
         self.assertEqual(result["status"], "complete")
         self.assertFalse(result["quantitative_evaluation"])
         self.assertEqual(len(result["records"]), 4)
+        self.assertTrue((self.root / "results/timings.csv").is_file())
+        for record in result["records"]:
+            for field in ("source_load_seconds", "transform_seconds", "batch_wait_seconds",
+                          "inference_wall_seconds", "selection_seconds", "export_seconds"):
+                self.assertGreaterEqual(record["timing"][field], 0)
         self.assertEqual(processor.embeddings, 4)
         self.assertEqual(len(model.points), 36)
         for record in result["records"]:
@@ -102,12 +107,17 @@ class ExperimentStructureTests(unittest.TestCase):
         processor = FakeProcessor(native)
         with patch.dict(os.environ, {"SLURM_JOB_ID": "test", "SLURM_STEP_ID": "0"}), \
                 patch("torch.cuda.is_available", return_value=True), \
+                patch("torch.cuda.synchronize"), \
+                patch("torch.cuda.get_device_name", return_value="mock GPU"), \
                 patch("experiments.sam3_fragmentation.experiment.load_scene_model",
                       return_value=(native, processor, {"mocked": True})) as loader:
             report = run(replace(self.config, checkpoint=checkpoint), self.root / "run")
         self.assertEqual(report["status"], "complete")
         self.assertEqual(loader.call_count, 1)
         self.assertTrue((self.root / "run/config.json").is_file())
+        timings = json.loads((self.root / "run/timing.json").read_text())
+        self.assertEqual(timings["input_count"], 4)
+        self.assertTrue(timings["cuda_synchronized"])
 
     def test_login_node_rejected_before_any_model_loading_or_output(self):
         with patch.dict(os.environ, {}, clear=True), \
