@@ -2,15 +2,17 @@
 
 Use the worktree `.worktrees/stimulus-refactor` for this branch. Python 3.12 is
 the deployment target; no Python 3.14 syntax or mlvbench dependency is introduced.
-CPU dependencies are NumPy, Pillow (>=10.1 for sized default fonts), OpenCV,
+The minimal `pyproject.toml` allows editable installation with
+`python -m pip install --no-deps --no-build-isolation -e .` in the existing environment;
+this does not reinstall SAM3, PyTorch or checkpoints. CPU dependencies are NumPy, Pillow (>=10.1 for sized default fonts), OpenCV,
 Matplotlib, PyTorch and torchvision. COCO file loading additionally needs
 pycocotools; an existing COCO API is injected rather than downloaded.
 
 ```python
 from torchvision.transforms import Compose
-from data_selection.dataset import ImageMaskDataset, CocoInstanceDataset, build_loader
-from stimuli_generation.transforms import FenceOcclusion, ContourFragmentation
-from stimuli_generation.fragmentation import FragmentationConfig
+from bwlab.datasets import ImageMaskDataset, CocoInstanceDataset, build_loader
+from bwlab.stimuli import FenceOcclusion, ContourFragmentation
+from bwlab.stimuli import FragmentationConfig
 
 fence = FenceOcclusion(bar_width=12, bar_spacing=40, bar_angle=90, seed=42)
 contour = ContourFragmentation(FragmentationConfig(noise_count=300), seed=42)
@@ -101,12 +103,35 @@ ledger and usable mask exports, so they cannot be faithfully rebuilt locally.
 Use the complete Vulcan result directory; do not invent candidate scores or
 coordinates from a flattened image. New inference exports use the new labels.
 
-For in-memory integration, `scene_segmentation/adapters.py::Sam3GridAdapter`
-reuses `collect_proposals` on an already loaded model/processor.
-`evaluation/pipeline.py::run_pipeline` passes only RGB to the model and gives
-the sample and prediction to an evaluator with `update()` / `finalize()`.
-Callers own SLURM checks, inference context and model lifecycle. No new metric
-or ground-truth-based model choice is built into this interface.
+The primary configured entrypoint is now
+[`experiments/sam3_fragmentation/experiment.py`](../experiments/sam3_fragmentation/experiment.py),
+which wires the DataModule, transforms, Sam3GridAdapter, Runner and concrete
+SceneProposalTask together. See the [experiment guide](../experiments/sam3_fragmentation/README.md)
+for JSON configuration and `prepare`/`run` commands. New code imports the reusable
+`bwlab` package; previous paths remain compatibility imports.
+
+For in-memory integration, `bwlab.models.sam3.Sam3GridAdapter.predict()` reuses
+`collect_proposals` on an already loaded model/processor. `bwlab.runner.Runner`
+reads explicit evaluation loaders and passes only RGB to the model; its task's
+evaluator receives sample dictionaries and archives targets separately through
+`update()` / `finalize()`. `SceneProposalTask` saves the existing proposal archive
+and reports artifact locations/counts, without introducing quantitative scores.
+The old `run_pipeline` callable interface remains for compatibility.
+
+```python
+from bwlab.datasets import ManifestDataModule
+from bwlab.models import Sam3GridAdapter
+from bwlab.runner import Runner
+from bwlab.tasks.scene_proposals import SceneProposalTask
+
+module = ManifestDataModule({"test": manifest_path}, transform=fence)
+runner = Runner(module, SceneProposalTask())
+# Inside an approved inference context, with an already loaded native model:
+# results = runner.evaluate(Sam3GridAdapter(model, processor), output_path)
+```
+
+The full structure and reference correspondence are documented in
+[architecture.md](architecture.md). Ordinary CPU preparation does not load SAM3.
 
 ## Interpretation and validation
 

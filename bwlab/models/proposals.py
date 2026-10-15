@@ -161,11 +161,3 @@ def select_proposals(proposals: list[Proposal], *, min_score: float | None = Non
                   "proposal_limit": proposal_limit, "limit_applied_after_deduplication": True,
                   "area_filter": None, "stability_filter": None, "crop_layers": 0},
     }
-
-
-
-
-
-
-
-

@@ -53,7 +53,7 @@ are further reasons not to use it as the reproducible historical baseline.
 
 ## Preserved behavior and limitations
 
-The adapter in `stimuli_generation/fragmentation.py` calls the frozen outline,
+The adapter in `bwlab/stimuli/fragmentation.py` calls the frozen outline,
 noise and drawing helpers with `fragment_one` defaults: automatic edge length
 bounded to 4–12 px, gap factor 0.4, scan outline, zero jitter, 1 px thickness,
 300 uniform noise attempts, separation pad 1, target density 6 per 100 px.
@@ -82,7 +82,7 @@ module namespaces, not global monkey patches. It cannot recover past entropy
 draws, and increasing contour fragmentation settings does not guarantee nesting.
 The original unseeded file-based entrypoint remains available unchanged.
 
-`stimuli_generation/fence.py` retains its seeded fixed-center rasterization,
+`bwlab/stimuli/fence.py` (also available through `stimuli_generation/fence.py`) retains its seeded fixed-center rasterization,
 pixel-center coordinates and half-open bars. Explicit `phase` is an additive
 keyword-only option; phase and seed are mutually exclusive. Fixed spacing,
 angle and seed/phase give nested masks as width increases. Multiple fence
@@ -123,7 +123,19 @@ Neither Meta source, checkpoint nor Vulcan environment is modified.
 This proposal adds Dataset/transform/model/evaluator interfaces and CPU stimulus
 preparation. It does not implement a new quantitative benchmark, training loop,
 encoder/decoder probe, or oracle mask-selection policy. The existing
-`evaluation/preparation.py` common-visible positive prompt protocol remains
+`bwlab/tasks/preparation.py` common-visible positive prompt protocol
+(re-exported at `evaluation/preparation.py`) remains
 separate from automatic independent grid queries. Merge requires the owner's
 explicit approval; subsequent quantitative development must branch from updated
 main after that merge.
+
+
+## Structural revision after review
+
+The reusable implementation now lives under `bwlab/`, matching the pinned
+reference's division into datasets, stimuli, models and tasks. The experiment
+has its own Config and `run()` under `experiments/sam3_fragmentation/` and uses
+the shared Runner. The initial directories are compatibility wrappers, not
+parallel implementations. See [architecture.md](architecture.md) for the exact
+correspondence and [refactor_validation.md](refactor_validation.md) for current
+test evidence. Frozen sources and existing main files remain unchanged.

@@ -31,5 +31,3 @@ class ImageMaskDataset(Dataset):
                   "segmentation": mask, "metadata": deepcopy(record.get("metadata", {}))}
         validate_sample(sample)
         return self.transform(sample) if self.transform is not None else sample
-
-

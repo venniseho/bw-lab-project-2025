@@ -52,7 +52,8 @@ flowchart LR
     E --> R[Results and provenance]
 ```
 
-- Dataset uses `__len__` / `__getitem__`; transforms work with Compose.
+- Reusable `bwlab/` datasets use `__len__` / `__getitem__`; transforms work with
+  Compose. Experiment configuration and `run()` live under `experiments/`.
 - Original mask is retained; fence visible and occlusion masks are separate.
 - Frozen contour geometry/noise remains available alongside the old main code.
 - Software tests check alignment and preservation, not scientific validity.

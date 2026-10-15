@@ -6,8 +6,10 @@
 python -B -m unittest discover -s tests -v
 ```
 
-Result: **83 tests passed**, no skips, 9.520 seconds on the final full run.
-21 stimulus/dataset/label tests are new; 62 existing regression tests are reused.
+Result: **93 tests passed**, no skips, 12.503 seconds on the final full run.
+31 stimulus/dataset/label/architecture tests are new; 62 existing regression
+tests are reused. The earlier 83-test suite also passed after relocation into
+the canonical library.
 
 | Suite | Tests |
 | --- | ---: |
@@ -19,7 +21,8 @@ Result: **83 tests passed**, no skips, 9.520 seconds on the final full run.
 | New stimulus transforms | 13 |
 | New datasets / CPU preparation / model boundary | 6 |
 | New contact-sheet labels / archive rebuild | 2 |
-| Total | 83 |
+| Library/experiment composition and architecture | 10 |
+| Total | 93 |
 
 The frozen fragmenter Git blob hash is checked in the suite. All five archive
 source files were separately compared byte-for-byte to `27f9bd6`. Four root
@@ -48,3 +51,30 @@ natural-image sheets lack the complete archive needed for faithful rebuilding.
 
 No GPU jobs, native SAM3 changes, training, or new quantitative experiments were
 run. Software regression success does not validate scientific assumptions.
+
+## Canonical library and experiment validation
+
+The pinned reference's complete library/experiment layout, model base, trainer,
+README and launcher were reviewed in addition to the six original files. The
+actual implementation now lives under `bwlab/`, and Config/run wiring under
+`experiments/sam3_fragmentation/`; previous paths are compatibility imports.
+
+The new integration suite exercises named train/val/test loaders, source-image
+split leakage rejection, independent severity expansion with unique sample
+keys, CPU preparation of both arms, the shared Runner with the native SAM3 fake,
+the full experiment `run()` with mocked CUDA/model loading, login-node rejection,
+relative config paths and the library's one-way dependency boundary. It checks
+actual exported candidate files, contact sheets, original masks and result
+manifests. This is not a new quantitative segmentation experiment.
+
+Editable package installation succeeded with
+`python -m pip install --no-deps --no-build-isolation -e .` in the local venv.
+Imports from outside the worktree resolved to that installed library. No
+dependencies were installed or upgraded for this structural revision. New
+library and experiment files all parse with Python 3.12 grammar, and the five
+frozen archive files remain byte-identical.
+
+The experiment CLI's CPU `prepare` command was also run on the preserved fence
+demo pair. It generated clean/light/medium/heavy inputs, separate targets and
+config/manifest files under ignored `outputs/review/structured_fence/`. No model
+was loaded. Both the old smoke CLI and new experiment expose working `--help`.

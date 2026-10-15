@@ -51,5 +51,3 @@ class CocoInstanceDataset(Dataset):
                   "metadata": deepcopy(selection.metadata)}
         validate_sample(sample)
         return self.transform(sample) if self.transform is not None else sample
-
-

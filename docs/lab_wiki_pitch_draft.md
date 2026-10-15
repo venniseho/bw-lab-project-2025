@@ -39,6 +39,10 @@ tests without changing several components at once.
 
 # Approach
 
+Organize reusable code under `bwlab/{datasets,stimuli,models,tasks}`, with a
+shared Runner and separate configuration and `run()` functions under
+`experiments/`, following the pinned mlvbench structure.
+
 Use Dataset → transforms → SAM3 → evaluator → results. Keep the original
 fragmented-outline algorithm with noise as one arm and deterministic synthetic
 fences as another. Compare matched source images across clean/light/medium/heavy
