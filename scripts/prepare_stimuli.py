@@ -8,12 +8,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import numpy as np
-from PIL import Image
 
-from data_selection.dataset import ImageMaskDataset
-from stimuli_generation.fragmentation import FragmentationConfig
-from stimuli_generation.transforms import ContourFragmentation, FenceOcclusion
+from bwlab.stimuli.fragmentation import FragmentationConfig
 
 
 def main(argv=None) -> None:
@@ -29,45 +25,13 @@ def main(argv=None) -> None:
     parser.add_argument("--seed", type=int)
     parser.add_argument("--fragmentation-config", type=Path, help="JSON FragmentationConfig fields")
     args = parser.parse_args(argv)
-    if args.output_dir.exists():
-        raise FileExistsError(args.output_dir)
-    records = json.loads(args.manifest.read_text(encoding="utf-8"))
-    for record in records:
-        for field in ("image_path", "mask_path"):
-            record[field] = str(args.manifest.resolve().parent / record[field])
-    config = FragmentationConfig(**json.loads(args.fragmentation_config.read_text())) if args.fragmentation_config else FragmentationConfig()
-    if args.transform == "fence":
-        if args.widths[0] != 0 or not all(a < b for a, b in zip(args.widths, args.widths[1:])):
-            parser.error("fence widths must start at zero and strictly increase")
-        conditions = [(name, FenceOcclusion(width, args.spacing, args.angle, args.seed, args.phase))
-                      for name, width in zip(("clean", "light", "medium", "heavy"), args.widths)]
-    else:
-        conditions = [("fragmentation", ContourFragmentation(config, args.seed))]
-    dataset = ImageMaskDataset(records)
-    args.output_dir.mkdir(parents=True)
-    (args.output_dir / "inputs").mkdir()
-    (args.output_dir / "targets").mkdir()
-    report = {"status": "preparing", "transform": args.transform, "records": []}
-    report_path = args.output_dir / "manifest.json"
-    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    for index, sample in enumerate(dataset):
-        for name, transform in conditions:
-            output = transform(sample)
-            stem = f"{index:06d}_{name}"
-            image_path = f"inputs/{stem}.png"
-            target_path = f"targets/{stem}.npz"
-            Image.fromarray(output["image"]).save(args.output_dir / image_path)
-            targets = {key: output[key] for key in ("segmentation", "visible_segmentation", "occlusion_mask") if key in output}
-            if "fragmentation" in output:
-                targets.update({key: output["fragmentation"][key] for key in ("outline_segments", "noise_segments")})
-            np.savez_compressed(args.output_dir / target_path, **targets)
-            report["records"].append({"__key__": sample["__key__"], "condition": name,
-                                      "image": image_path, "targets": target_path,
-                                      "transforms": output["transforms"],
-                                      "metadata": output.get("metadata", {})})
-            report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    report["status"] = "complete"
-    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    config = FragmentationConfig(**json.loads(args.fragmentation_config.read_text(encoding="utf-8"))) if args.fragmentation_config else FragmentationConfig()
+    from experiments.sam3_fragmentation.experiment import Config, prepare
+    experiment = Config(manifest=args.manifest, condition=args.transform,
+                        seed=args.seed, fence_widths=tuple(args.widths),
+                        fence_spacing=args.spacing, fence_angle=args.angle,
+                        fence_phase=args.phase, fragmentation=config)
+    report = prepare(experiment, args.output_dir)
     print(f"Prepared {len(report['records'])} inputs in {args.output_dir}; SAM3 has not been run.")
 
 

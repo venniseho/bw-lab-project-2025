@@ -11,8 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 from PIL import Image
 
-from scene_segmentation.proposals import Proposal, all_proposal_overlay, contact_sheet
-from scripts.sam3_smoke_test import load_rgb
+from bwlab.models.proposals import Proposal
+from bwlab.visualization import all_proposal_overlay, contact_sheet
+from bwlab.infrastructure import load_rgb
 
 
 def relabel_scene(scene_dir: Path, output: Path) -> None:

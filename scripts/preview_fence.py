@@ -16,7 +16,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from stimuli_generation.fence import generate_fence
+from bwlab.stimuli.fence import generate_fence
 
 
 def main() -> None:

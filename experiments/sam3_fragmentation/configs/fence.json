@@ -1,0 +1,12 @@
+{
+  "manifest": "../../../records.json",
+  "condition": "fence",
+  "subset": "test",
+  "seed": 42,
+  "fence_widths": [0, 4, 12, 24],
+  "fence_spacing": 40,
+  "fence_angle": 90,
+  "points_per_side": 3,
+  "dedup_iou": null,
+  "checkpoint": null
+}
