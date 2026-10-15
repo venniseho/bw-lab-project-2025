@@ -74,5 +74,3 @@ class FakeSceneModel:
         masks[0, 0, 0] = 1
         masks[1, -1, -1] = 1
         return masks, np.array([0.9, 0.2, 0.1]), None
-
-
