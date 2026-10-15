@@ -33,6 +33,11 @@ completion behind pre-existing natural occluders.
   are not isolated inference benchmarks.
 - Original copied results remain unchanged. New contact sheets are regenerated
   from saved masks and metadata on CPU; no new SAM3 inference is needed.
+- A subsequent timed pilot (job `1763883`) completed ten matching source images
+  through both arms: 40 fence inputs and ten contour inputs, 1,350 raw proposals,
+  in a 3 min 31 s job. Median inference was about 109-110 ms per input; diagnostic
+  export/visualization dominated wall time. This is runtime validation, not an
+  accuracy or robustness measurement.
 - Review the overlay/function-cleanup follow-up separately, run its CPU suite
   on Vulcan, and merge it after review. No quantitative experiment has been
   completed yet.

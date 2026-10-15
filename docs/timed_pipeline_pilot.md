@@ -97,3 +97,39 @@ The summary checks completed states, ten unique sources per arm, 40/10 records,
 and matching source sets before displaying timing summaries. Review the saved
 stimuli/targets and contact sheets too. Local testing of preparation and mocked
 inference does not substitute for this real 50-input GPU run.
+
+## Completed Vulcan pilot, 2026-10-15
+
+The user ran SLURM job `1763883` using the timed-pilot scripts.
+The job and both steps completed with exit code `0:0`, total 3 min 31 s.
+The summary confirmed ten matching source images, 40 fence inputs with 1,080
+raw proposals and ten contour inputs with 270 raw proposals.
+
+| Arm | Model load | Pipeline | Run-function total | SLURM step elapsed |
+| --- | ---: | ---: | ---: | ---: |
+| Fence | 22.868 s | 134.774 s | 157.696 s | 164 s |
+| Contour fragmentation | 18.511 s | 24.971 s | 43.519 s | 46 s |
+
+The SLURM step includes process startup/imports outside the run-function timer.
+There are four times as many fence inputs; raw arm totals are not a per-image
+speed comparison.
+
+| Condition | Transform median / p95 (ms) | Inference median / p95 (ms) | Export median / p95 (ms) |
+| --- | ---: | ---: | ---: |
+| Clean | 1.47 / 2.17 | 109.30 / 531.34 | 4480.20 / 5126.60 |
+| Light fence | 2.67 / 2.92 | 109.25 / 111.47 | 3963.93 / 4724.65 |
+| Medium fence | 3.35 / 3.75 | 108.19 / 111.13 | 3134.93 / 3764.07 |
+| Heavy fence | 4.57 / 5.12 | 108.68 / 111.86 | 2178.23 / 2603.10 |
+| Contour fragmentation | 80.54 / 1865.56 | 110.44 / 230.79 | 1934.06 / 2136.46 |
+
+These reported summaries include each arm's first call. Consult the saved
+first-call-excluded summary before interpreting the high clean-inference or
+contour-transform p95 as steady-state behavior. The provided aggregate values
+alone do not establish the cause of those outliers.
+
+Export/visualization dominates these measurements, while median inference is
+similar across conditions. A sensible next performance change is a separately
+configured export policy (for example fewer diagnostic overlays/contact sheets)
+while preserving the current full-archive baseline and recording omissions.
+No export policy has been changed as part of recording these results, and no
+segmentation accuracy or robustness conclusion follows from them.

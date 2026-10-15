@@ -123,8 +123,11 @@ seconds. Tests cover grouped statistics/CSV output, explicit synchronization
 callbacks at embedding/query boundaries, paired source selection, and measured
 fields/artifacts in the mocked full run. Actual CPU preparation also succeeded
 on the ten selected repository pairs: 40 fence and ten contour inputs, matching
-source sets. Python 3.12 syntax was checked on new modules. The real 50-input
-Vulcan GPU run has not been submitted by the assistant.
+source sets. Python 3.12 syntax was checked on new modules. The assistant did
+not submit the GPU job; the user subsequently completed the real 50-input run
+as job `1763883`, exit `0:0`, in 3 minutes 31 seconds. Both source-set/count
+checks passed, with 1,080 fence and 270 contour proposals. See the timing guide
+for the reported model-load, transform, inference and export measurements.
 
 Timing measures synchronized wall-clock boundaries, including CPU work where
 documented, not isolated CUDA kernel duration. Refer to the
