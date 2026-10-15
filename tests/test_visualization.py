@@ -9,7 +9,9 @@ from PIL import ImageDraw
 from PIL import Image
 from bwlab.visualization import prompt_overlay
 
-from scene_segmentation.proposals import Proposal, all_proposal_overlay, contact_sheet, save_scene, select_proposals
+from bwlab.models.proposals import Proposal, select_proposals
+from bwlab.visualization import all_proposal_overlay, contact_sheet
+from bwlab.tasks._scene_export import save_scene
 from scripts.relabel_scene import relabel_scene
 
 
@@ -75,7 +77,7 @@ class ContactSheetTests(TestCase):
                 return real_multiline_text(position, text, **kwargs)
             draw.multiline_text = record
             return draw
-        with patch("scene_segmentation.proposals.ImageDraw.Draw", side_effect=capture):
+        with patch("bwlab.visualization.ImageDraw.Draw", side_effect=capture):
             sheet = contact_sheet(rgb, all_proposal_overlay(rgb, [proposal]), [proposal])
         caption = "\n".join(captions)
         for text in ("P00017", "grid point 5", "candidate 2", "Predicted IoU: 0.812",

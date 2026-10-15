@@ -9,8 +9,9 @@ import os
 import sys
 
 import numpy as np
-from scene_segmentation.proposals import (point_grid, collect_proposals, select_proposals,
-                                         save_scene, packed_mask_iou)
+from bwlab.models.proposals import (point_grid, collect_proposals, select_proposals,
+                                         packed_mask_iou)
+from bwlab.tasks._scene_export import save_scene
 from scripts.sam3_scene_masks import checked_state, load_scene_model, validate_scene_api, main
 
 

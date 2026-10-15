@@ -9,10 +9,10 @@ import numpy as np
 from PIL import Image
 from torchvision.transforms import Compose
 
-from data_selection.dataset import ImageMaskDataset, CocoInstanceDataset, build_loader
-from evaluation.pipeline import run_pipeline
+from bwlab.datasets import ImageMaskDataset, CocoInstanceDataset, build_loader
+from bwlab.runner import run_pipeline
 from scripts.prepare_stimuli import main
-from stimuli_generation.transforms import FenceOcclusion
+from bwlab.stimuli.transforms import FenceOcclusion
 
 
 class DatasetTests(unittest.TestCase):

@@ -70,11 +70,10 @@ Condition expansion preserves `source_key` and appends the condition name to
 `__key__`, giving each transformed sample a stable unique identifier. Every
 severity starts from the same original sample, preserving the full target.
 
-The older `data_selection/`, `stimuli_generation/`, `evaluation/` and
-`scene_segmentation/` import paths now re-export the canonical implementations.
-They contain no second algorithm. Existing commands keep working, while new
-experiments import `bwlab` directly. Root historical scripts and the five frozen
-archive source files remain untouched.
+The old import-only compatibility folders have been removed. All callers use
+`bwlab` directly. Historical root scripts and their assets now live together
+under `legacy/main_2025/`, with their contents preserved. The frozen contour
+baseline remains under `legacy/contour_fragmentation/`.
 
 The adaptation keeps native NumPy RGB arrays, the existing Meta API and Python
 3.12 compatibility. It does not copy the reference's feature/probe trainer,
@@ -85,5 +84,5 @@ interface, trainer, experiment and launcher were inspected in addition to the
 six originally requested files.
 
 The first validated refactor was merged via PR #3. Follow-up rendering and
-function cleanup is on a new branch based on that updated main. Compatibility
-imports stay available; historical files are not moved or rewritten.
+function cleanup is on a new branch based on that updated main. The follow-up also removes compatibility
+folders and relocates historical files without rewriting them.

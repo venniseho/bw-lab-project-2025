@@ -82,7 +82,7 @@ module namespaces, not global monkey patches. It cannot recover past entropy
 draws, and increasing contour fragmentation settings does not guarantee nesting.
 The original unseeded file-based entrypoint remains available unchanged.
 
-`bwlab/stimuli/fence.py` (also available through `stimuli_generation/fence.py`) retains its seeded fixed-center rasterization,
+`bwlab/stimuli/fence.py` retains its seeded fixed-center rasterization,
 pixel-center coordinates and half-open bars. Explicit `phase` is an additive
 keyword-only option; phase and seed are mutually exclusive. Fixed spacing,
 angle and seed/phase give nested masks as width increases. Multiple fence
@@ -124,7 +124,7 @@ This proposal adds Dataset/transform/model/evaluator interfaces and CPU stimulus
 preparation. It does not implement a new quantitative benchmark, training loop,
 encoder/decoder probe, or oracle mask-selection policy. The existing
 `bwlab/tasks/preparation.py` common-visible positive prompt protocol
-(re-exported at `evaluation/preparation.py`) remains
+remains
 separate from automatic independent grid queries. Merge requires the owner's
 explicit approval; subsequent quantitative development must branch from updated
 main after that merge.
@@ -135,7 +135,8 @@ main after that merge.
 The reusable implementation now lives under `bwlab/`, matching the pinned
 reference's division into datasets, stimuli, models and tasks. The experiment
 has its own Config and `run()` under `experiments/sam3_fragmentation/` and uses
-the shared Runner. The initial directories are compatibility wrappers, not
-parallel implementations. See [architecture.md](architecture.md) for the exact
+the shared Runner. The initial compatibility directories have been removed. See [architecture.md](architecture.md) for the exact
 correspondence and [refactor_validation.md](refactor_validation.md) for current
-test evidence. Frozen sources and existing main files remain unchanged.
+test evidence. Frozen sources remain unchanged; historical main files are now preserved under
+`legacy/main_2025/`. Earlier root paths in this inventory describe the original
+checkout, before that relocation.

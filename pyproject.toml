@@ -16,6 +16,7 @@ legacy = ["scikit-image"]
 
 [tool.setuptools.packages.find]
 include = ["bwlab*", "experiments*", "legacy*"]
+exclude = ["legacy.main_2025*"]
 
 [tool.setuptools.package-data]
 "experiments.sam3_fragmentation" = ["configs/*.json", "README.md"]

@@ -18,7 +18,24 @@ proposal-export task reuses the working native SAM3 workflow.
 - [Lab wiki pitch draft](docs/lab_wiki_pitch_draft.md)
 - [Existing native SAM3 workflow](docs/sam3_scene_masks.md)
 
-The root historical scripts and tracked assets remain intact. New contour
-adapters use the frozen archive copy under `legacy/contour_fragmentation/`.
-Previous import paths remain available as compatibility wrappers.
-No quantitative extension or GPU experiment is part of this refactor.
+## Where things live
+
+| Folder | Purpose |
+| --- | --- |
+| `bwlab/` | Reusable datasets, transforms, model adapters and tasks |
+| `experiments/` | Experiment entry points and configurations |
+| `scripts/` | Command-line tools and Vulcan job scripts |
+| `tests/` | Tests grouped like the library |
+| `docs/` | Usage, architecture and research notes |
+| `legacy/contour_fragmentation/` | Frozen contour algorithm used by the adapter |
+| `legacy/main_2025/` | Historical scripts, source assets and old outputs |
+| `data/` | Local datasets (ignored by Git) |
+| `outputs/` | Current runs and downloaded Vulcan results (ignored by Git) |
+
+The old import-only folders have been removed; use `bwlab` imports.
+Historical files were relocated without changing their contents. See
+[the archive guide](legacy/main_2025/README.md) before running old scripts.
+The ten-image pilot automatically finds the archived image/mask pairs.
+
+Run the CPU checks with `python -B -m unittest discover -s tests -v`.
+Use the [Vulcan pilot guide](docs/timed_pipeline_pilot.md) for GPU runs.

@@ -23,3 +23,15 @@ class PilotSelectionTests(TestCase):
             self.assertTrue(all(r["mask_path"].endswith("ann1.png") for r in records))
             with self.assertRaisesRegex(ValueError, "Need 3"):
                 select_records(root, 3)
+
+    def test_relocated_archive_pairs_are_selected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "legacy" / "main_2025"
+            (archive / "images").mkdir(parents=True)
+            (archive / "masks").mkdir()
+            Image.fromarray(np.full((8, 10, 3), 100, np.uint8)).save(archive / "images/source.png")
+            Image.fromarray(np.ones((8, 10), np.uint8)).save(archive / "masks/source_ann1.png")
+            records = select_records(root, 1)
+            self.assertEqual(Path(records[0]["image_path"]), (archive / "images/source.png").resolve())
+            self.assertEqual(Path(records[0]["mask_path"]), (archive / "masks/source_ann1.png").resolve())

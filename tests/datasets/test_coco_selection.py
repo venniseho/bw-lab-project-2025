@@ -8,12 +8,12 @@ import unittest
 
 import numpy as np
 
-from data_selection.coco import (
+from bwlab.datasets.selection import (
     load_coco_image_instances, prepare_selected_probe, summarize_selection,
     validate_instance,
 )
-from evaluation.preparation import OcclusionCondition
-from stimuli_generation.fence import generate_fence
+from bwlab.tasks.preparation import OcclusionCondition
+from bwlab.stimuli.fence import generate_fence
 
 
 def annotation(identifier=1, crowd=0):

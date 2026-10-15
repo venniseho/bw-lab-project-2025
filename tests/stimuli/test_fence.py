@@ -7,7 +7,7 @@ import unittest
 
 import numpy as np
 
-from stimuli_generation.fence import generate_fence
+from bwlab.stimuli.fence import generate_fence
 
 
 class FenceTests(unittest.TestCase):

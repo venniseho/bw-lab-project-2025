@@ -15,9 +15,9 @@ from PIL import Image
 from torchvision.transforms import Compose
 
 from legacy.contour_fragmentation import mask_fragmenter_clean as legacy
-from stimuli_generation.fence import generate_fence
-from stimuli_generation.fragmentation import FragmentationConfig
-from stimuli_generation.transforms import ContourFragmentation, FenceOcclusion
+from bwlab.stimuli.fence import generate_fence
+from bwlab.stimuli.fragmentation import FragmentationConfig
+from bwlab.stimuli.transforms import ContourFragmentation, FenceOcclusion
 
 
 class StimulusTransformTests(unittest.TestCase):

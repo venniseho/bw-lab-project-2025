@@ -13,9 +13,11 @@ def select_records(repo: Path, count: int) -> list[dict]:
     """Choose first annotation filename per distinct image; no shape/area ranking."""
     if count < 1:
         raise ValueError("count must be positive")
+    archive = repo / "legacy" / "main_2025"
+    source = archive if archive.is_dir() else repo
     records = []
-    for image in sorted((repo / "images").glob("*.png")):
-        masks = sorted((repo / "masks").glob(f"{image.stem}_ann*.png"))
+    for image in sorted((source / "images").glob("*.png")):
+        masks = sorted((source / "masks").glob(f"{image.stem}_ann*.png"))
         if not masks:
             continue
         records.append({"__key__": image.stem, "image_path": str(image.resolve()),

@@ -5,12 +5,12 @@ import unittest
 
 import numpy as np
 
-from evaluation.preparation import (
+from bwlab.tasks.preparation import (
     OcclusionCondition,
     build_evaluation_targets,
     prepare_probe,
 )
-from stimuli_generation.fence import generate_fence
+from bwlab.stimuli.fence import generate_fence
 
 
 class ProbePreparationTests(unittest.TestCase):
