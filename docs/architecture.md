@@ -40,7 +40,8 @@ experiments/
     experiment.py               Config, build_data_module, prepare, run
     configs/                    fence and contour JSON examples
     README.md                   experiment commands and output layout
-tests/                          software and integration tests
+tests/{datasets,models,stimuli,tasks}/  tests mirror library responsibilities
+tests/helpers.py                shared native SAM3 test doubles
 legacy/contour_fragmentation/   exact archive source, unchanged
 ```
 
@@ -69,11 +70,10 @@ Condition expansion preserves `source_key` and appends the condition name to
 `__key__`, giving each transformed sample a stable unique identifier. Every
 severity starts from the same original sample, preserving the full target.
 
-The older `data_selection/`, `stimuli_generation/`, `evaluation/` and
-`scene_segmentation/` import paths now re-export the canonical implementations.
-They contain no second algorithm. Existing commands keep working, while new
-experiments import `bwlab` directly. Root historical scripts and the five frozen
-archive source files remain untouched.
+The old import-only compatibility folders have been removed. All callers use
+`bwlab` directly. Historical root scripts and their assets now live together
+under `legacy/main_2025/`, with their contents preserved. The frozen contour
+baseline remains under `legacy/contour_fragmentation/`.
 
 The adaptation keeps native NumPy RGB arrays, the existing Meta API and Python
 3.12 compatibility. It does not copy the reference's feature/probe trainer,
@@ -82,3 +82,7 @@ scheduler launcher. Those components serve reference experiments not yet part
 of the authorized BWLab refactor. The pinned README, library layout, model
 interface, trainer, experiment and launcher were inspected in addition to the
 six originally requested files.
+
+The first validated refactor was merged via PR #3. Follow-up rendering and
+function cleanup is on a new branch based on that updated main. The follow-up also removes compatibility
+folders and relocates historical files without rewriting them.

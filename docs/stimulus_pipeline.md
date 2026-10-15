@@ -143,8 +143,9 @@ inspect hidden-region behavior before claiming completion. Oracle best-mask IoU
 must be labeled an upper bound, separately from model-score selection.
 
 Regression tests check code behavior, not human-like grouping or causal failure
-localization. Current CPU tests use synthetic masks and mocked SAM3; a real
-Python 3.12/Vulcan compatibility check and GPU smoke test remain pending approval.
+localization. Current CPU tests use synthetic masks and mocked SAM3; the merged baseline has now passed the 93-test suite on Vulcan Python 3.12 and
+a real five-condition GPU smoke test (job 1762018). See the validation record
+for the separately tested rendering follow-up.
 After explicit merge approval, branch from updated main to extend quantitative
 protocols, paired prompts, selection policies and result aggregation.
 
@@ -158,5 +159,10 @@ python -B -m unittest discover -s tests -p test_probe_preparation.py -v
 python -B -m unittest discover -s tests -p test_sam3_smoke.py -v
 python -B -m unittest discover -s tests -p test_scene_proposals.py -v
 python -B -m unittest discover -s tests -p 'test_stimulus_*.py' -v
-python -B -m unittest discover -s tests -p test_contact_sheet_labels.py -v
+python -B -m unittest discover -s tests -p test_visualization.py -v
 ```
+
+Prompt overlays now label every queried point as G0, G1, etc. on both header
+previews. Individual candidates show their own query over RGB plus the colored
+mask. These are display-only markers; saved raw masks and original RGB are
+unchanged. See [supervisor_update.md](supervisor_update.md) for a project update.

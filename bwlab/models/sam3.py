@@ -10,6 +10,12 @@ from bwlab.infrastructure import file_fingerprint
 from bwlab.models.proposals import collect_proposals
 
 from dataclasses import dataclass
+from collections.abc import Callable
+
+
+def _no_sync() -> None:
+    """CPU-test default; real GPU experiments supply torch.cuda.synchronize."""
+    return None
 
 VERIFIED_SAM3_API_REVISION = "0570b3a5be9c4e694f23d85232fb55f4a6f1f7fc"
 
@@ -110,9 +116,11 @@ class Sam3GridAdapter:
     model: object
     processor: object
     points_per_side: int = 3
+    synchronize: Callable[[], None] = _no_sync
 
     def predict(self, image: np.ndarray) -> tuple:
-        return collect_proposals(self.model, self.processor, image, self.points_per_side)
+        return collect_proposals(self.model, self.processor, image, self.points_per_side,
+                                 synchronize=self.synchronize)
 
     def __call__(self, image: np.ndarray) -> tuple:
         return self.predict(image)

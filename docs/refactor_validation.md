@@ -49,8 +49,9 @@ The contact-sheet layout was visually inspected on an explicitly synthetic
 preview. This is a rendering check, not an inferred SAM3 result. Existing local
 natural-image sheets lack the complete archive needed for faithful rebuilding.
 
-No GPU jobs, native SAM3 changes, training, or new quantitative experiments were
-run. Software regression success does not validate scientific assumptions.
+At the initial local validation no GPU jobs or new quantitative experiments
+had been run. Subsequent Vulcan validation is recorded below. Software
+regression success does not validate scientific assumptions.
 
 ## Canonical library and experiment validation
 
@@ -78,3 +79,56 @@ The experiment CLI's CPU `prepare` command was also run on the preserved fence
 demo pair. It generated clean/light/medium/heavy inputs, separate targets and
 config/manifest files under ignored `outputs/review/structured_fence/`. No model
 was loaded. Both the old smoke CLI and new experiment expose working `--help`.
+
+## Vulcan validation of merged baseline
+
+The user ran the 93-test suite on Vulcan at `2e335c3`, with Python 3.12.4,
+OpenCV 4.12.0 and NumPy 1.26.4; every listed test passed. The cluster's
+`opencv-python-headless` wheel is a dummy package; `module load opencv/4.12.0`
+provided the real cv2 bindings alongside the existing Python module and venv.
+
+SLURM job `1762018` completed in 68 seconds, exit `0:0`, on an NVIDIA L40S with
+PyTorch 2.14.1. Both pipeline arms completed: four fence conditions in 34 seconds
+and one contour condition in 27 seconds, 27 raw/retained proposals each, 135
+total. These job-step times include loading/export, not just inference. The
+native source, checkpoint and environment were reused; no training or new
+quantitative evaluation was performed.
+
+The copied five-scene archives were inspected locally. Each contains nine
+distinct query coordinates, masks, metadata, targets and contact sheets. Fence
+visible masks equal the original target minus synthetic occlusion. This
+confirms artifact integrity, not target accuracy or human-like grouping.
+PR #3 was merged at `060512c` after the owner's approval.
+
+## Prompt overlays and function-cleanup follow-up
+
+The new branch starts from merged main. Prompt dots and grid IDs are rendered
+on both contact-sheet header images and on individual RGB/mask overlays.
+All queried locations remain visible even if their proposals are filtered.
+Saved source RGB, binary masks and model inputs are unchanged. New scene
+archives also contain a separate `prompt_locations.png` display image.
+
+Rendering, condition construction, legacy-adapter orchestration and export
+have smaller purpose-specific helpers. The frozen legacy files are unchanged.
+Tests now mirror the library's datasets/models/stimuli/tasks directories, with
+shared native mocks in `tests/helpers.py`. Two new rendering tests cover scaled
+coordinates/deduplication and points without retained proposals. The follow-up
+suite passed all 95 tests locally in 10.625 seconds; its actual GPU inference path has not been rerun, since
+this follow-up changes rendering/refactoring, not inference or generation rules.
+
+## Timed pilot preparation
+
+The subsequent timing/pilot additions passed all 99 local CPU tests in 12.286
+seconds. Tests cover grouped statistics/CSV output, explicit synchronization
+callbacks at embedding/query boundaries, paired source selection, and measured
+fields/artifacts in the mocked full run. Actual CPU preparation also succeeded
+on the ten selected repository pairs: 40 fence and ten contour inputs, matching
+source sets. Python 3.12 syntax was checked on new modules. The assistant did
+not submit the GPU job; the user subsequently completed the real 50-input run
+as job `1763883`, exit `0:0`, in 3 minutes 31 seconds. Both source-set/count
+checks passed, with 1,080 fence and 270 contour proposals. See the timing guide
+for the reported model-load, transform, inference and export measurements.
+
+Timing measures synchronized wall-clock boundaries, including CPU work where
+documented, not isolated CUDA kernel duration. Refer to the
+[timing boundary guide](timed_pipeline_pilot.md) before adding or comparing fields.

@@ -1,3 +1,4 @@
 # Preserve the exact historical source bytes, including mixed line endings.
 legacy/contour_fragmentation/*.py -text
 legacy/contour_fragmentation/setup_env.sh -text
+legacy/main_2025/** -text

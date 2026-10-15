@@ -53,7 +53,9 @@ Set `checkpoint` in that reviewed config to the existing native checkpoint,
 `/scratch/vho/sam3-whole-scene/checkpoints/sam3.pt`. Use the existing SAM3
 environment; do not reinstall it. The command submits no job and refuses a
 login-node run. The included configs leave checkpoint null to prevent an
-accidental inference run. No GPU run has been performed for this refactor.
+accidental inference run. The baseline was tested successfully on Vulcan in job 1762018.
+Load `opencv/4.12.0` as well as `python/3.12.4` before activating the existing
+venv; the OpenCV pip placeholder alone does not supply cv2.
 
 Inference creates `config.json` and `predictions/results.json`. Each numbered
 scene archive contains RGB, raw candidate masks, retained masks, clearer contact
@@ -65,3 +67,10 @@ The [architecture map](../../docs/architecture.md) explains each layer. Extend
 quantitative metrics and the separate common-visible prompting protocol only
 after approved merge into main. The old natural-image CLI remains available
 for qualitative images without masks.
+
+The [timed ten-image pilot](../../docs/timed_pipeline_pilot.md) provides a
+deterministic archived-pair manifest, a ready SLURM script and timing summaries.
+Runs save `timing.json` plus `predictions/timings.csv`; GPU embedding and query
+measurements use explicit CUDA synchronization. Timing fields overlap and must
+not all be summed. This pilot is an integration/runtime check, not an unbiased
+accuracy evaluation.

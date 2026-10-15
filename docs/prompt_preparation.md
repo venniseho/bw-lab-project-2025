@@ -8,7 +8,7 @@ visible-object support is `original & ~occlusion`. Inputs are never modified.
 ```python
 import numpy as np
 from evaluation.preparation import OcclusionCondition, prepare_probe
-from stimuli_generation.fence import generate_fence
+from bwlab.stimuli.fence import generate_fence
 
 # image_rgb and original_mask are arrays at the same original resolution.
 conditions = []

@@ -9,6 +9,8 @@ import argparse
 from dataclasses import asdict, dataclass, field
 import json
 import os
+import time
+import platform
 from pathlib import Path
 from typing import Literal
 
@@ -46,8 +48,8 @@ class Config:
     save_candidate_limit: int | None = None
 
 
-def build_data_module(config: Config) -> DataModule:
-    """Experiment owns condition choices; datasets only load and transform."""
+def build_conditions(config: Config) -> dict:
+    """Construct each experimental condition independently."""
     if config.subset not in ("val", "test"):
         raise ValueError("choose val or test explicitly")
     if config.condition == "fence":
@@ -65,6 +67,12 @@ def build_data_module(config: Config) -> DataModule:
         conditions = {"fragmentation": ContourFragmentation(config.fragmentation, config.seed)}
     else:
         raise ValueError("condition must be fence or fragmentation")
+    return conditions
+
+
+def build_data_module(config: Config) -> DataModule:
+    """Wire explicit source data to independently applied stimulus transforms."""
+    conditions = build_conditions(config)
     sources = ManifestDataModule({config.subset: config.manifest}, seed=config.seed or 0)
     original = sources.val_dataset() if config.subset == "val" else sources.test_dataset()
     return DataModule({config.subset: ConditionDataset(original, conditions)}, seed=config.seed or 0)
@@ -94,18 +102,24 @@ def run(config: Config, output_path: Path) -> dict:
     or claim that an oracle-selected proposal is an autonomous result.
     """
     require_slurm_step(os.environ)
+    run_start = time.perf_counter()
     if output_path.exists():
         raise FileExistsError(output_path)
     if config.checkpoint is None or not config.checkpoint.is_file():
         raise ValueError("run needs an existing native SAM3 checkpoint")
     if config.points_per_side < 1:
         raise ValueError("points_per_side must be positive")
+    setup_start = time.perf_counter()
     data_module = build_data_module(config)
+    dataset_setup_seconds = time.perf_counter()-setup_start
     import torch
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA required for native SAM3; use prepare for CPU export")
     torch.manual_seed(0)
+    load_start = time.perf_counter()
     model, processor, model_info = load_scene_model(config.checkpoint, config.bpe_path, torch)
+    torch.cuda.synchronize()
+    model_load_seconds = time.perf_counter()-load_start
     task = SceneProposalTask(min_score=config.min_score, dedup_iou=config.dedup_iou,
                              proposal_limit=config.proposal_limit,
                              save_candidate_limit=config.save_candidate_limit,
@@ -114,9 +128,22 @@ def run(config: Config, output_path: Path) -> dict:
                     num_workers=config.num_workers, prefetch_factor=config.prefetch_factor)
     output_path.mkdir(parents=True, exist_ok=False)
     _save_config(config, output_path)
+    pipeline_start = time.perf_counter()
     with torch.inference_mode():
-        return runner.evaluate(Sam3GridAdapter(model, processor, config.points_per_side),
-                               output_path / "predictions", subset=config.subset)
+        report = runner.evaluate(Sam3GridAdapter(model, processor, config.points_per_side,
+                                                 synchronize=torch.cuda.synchronize),
+                                  output_path / "predictions", subset=config.subset)
+    timing = {"dataset_setup_seconds": dataset_setup_seconds,
+              "model_load_seconds": model_load_seconds,
+              "pipeline_seconds": time.perf_counter()-pipeline_start,
+              "run_total_seconds": time.perf_counter()-run_start,
+              "input_count": len(report["records"]), "cuda_synchronized": True,
+              "gpu": torch.cuda.get_device_name(0), "torch_version": torch.__version__,
+              "python_version": platform.python_version(),
+              "timing_scope": "wall seconds; run excludes process imports and scheduler queue; pipeline includes loading/transforms/inference/export"}
+    (output_path / "timing.json").write_text(json.dumps(timing, indent=2)+"\n", encoding="utf-8")
+    print(json.dumps(timing))
+    return report
 
 
 def load_config(path: Path) -> Config:

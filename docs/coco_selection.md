@@ -72,11 +72,11 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 from pycocotools.coco import COCO
-from data_selection.coco import (
+from bwlab.datasets.selection import (
     load_coco_image_instances, prepare_selected_probe, summarize_selection,
 )
 from evaluation.preparation import OcclusionCondition
-from stimuli_generation.fence import generate_fence
+from bwlab.stimuli.fence import generate_fence
 
 coco = COCO("/path/to/existing/instances.json")
 image_id = sorted(coco.getImgIds())[0]  # Explicit source selection, not a filter.
