@@ -23,6 +23,7 @@ from bwlab.runner import Runner
 from bwlab.stimuli import ContourFragmentation, FenceOcclusion, FragmentationConfig
 from bwlab.stimuli.export import prepare_stimuli
 from bwlab.tasks.scene_proposals import SceneProposalTask
+from bwlab.runtime import RuntimeConfig
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,8 @@ class Config:
     dedup_iou: float | None = None
     proposal_limit: int = 100
     save_candidate_limit: int | None = None
+    runtime: RuntimeConfig | None = None
+    max_inputs: int | None = None
 
 
 def build_conditions(config: Config) -> dict:
@@ -75,7 +78,13 @@ def build_data_module(config: Config) -> DataModule:
     conditions = build_conditions(config)
     sources = ManifestDataModule({config.subset: config.manifest}, seed=config.seed or 0)
     original = sources.val_dataset() if config.subset == "val" else sources.test_dataset()
-    return DataModule({config.subset: ConditionDataset(original, conditions)}, seed=config.seed or 0)
+    dataset = ConditionDataset(original, conditions)
+    if config.max_inputs is not None:
+        from torch.utils.data import Subset
+        if config.max_inputs < 1:
+            raise ValueError("max_inputs must be positive")
+        dataset = Subset(dataset, range(min(config.max_inputs, len(dataset))))
+    return DataModule({config.subset: dataset}, seed=config.seed or 0)
 
 
 def _save_config(config: Config, output_path: Path) -> None:
@@ -101,7 +110,8 @@ def run(config: Config, output_path: Path) -> dict:
     This archives proposals and targets; it does not extend quantitative metrics
     or claim that an oracle-selected proposal is an autonomous result.
     """
-    require_slurm_step(os.environ)
+    if config.runtime is None or not config.runtime.allow_local:
+        require_slurm_step(os.environ)
     run_start = time.perf_counter()
     if output_path.exists():
         raise FileExistsError(output_path)
@@ -120,6 +130,9 @@ def run(config: Config, output_path: Path) -> dict:
     model, processor, model_info = load_scene_model(config.checkpoint, config.bpe_path, torch)
     torch.cuda.synchronize()
     model_load_seconds = time.perf_counter()-load_start
+    if config.runtime is not None:
+        return _run_optimized(config, output_path, data_module, model, processor, model_info,
+                              run_start, dataset_setup_seconds, model_load_seconds)
     task = SceneProposalTask(min_score=config.min_score, dedup_iou=config.dedup_iou,
                              proposal_limit=config.proposal_limit,
                              save_candidate_limit=config.save_candidate_limit,
@@ -146,6 +159,43 @@ def run(config: Config, output_path: Path) -> dict:
     return report
 
 
+def _run_optimized(config, output_path, data_module, model, processor, model_info,
+                   run_start, setup_seconds, load_seconds):
+    import torch
+    from bwlab.models.batched_sam3 import BatchedSam3GridAdapter
+    from bwlab.runtime import configure_model, gpu_memory, GPUMonitor
+    from bwlab.tasks.summary import SummaryTask
+
+    runtime = config.runtime
+    resources = configure_model(model, runtime)
+    adapter = (BatchedSam3GridAdapter(model, processor, config.points_per_side,
+                                    runtime.prompt_batch_size, runtime.pin_memory, torch.cuda.synchronize)
+               if runtime.batched else Sam3GridAdapter(model, processor, config.points_per_side,
+                                                      synchronize=torch.cuda.synchronize))
+    runner = Runner(data_module, SummaryTask(runtime.preview_batches), config.batch_size,
+                    config.num_workers, config.prefetch_factor, runtime.warmup_batches)
+    output_path.mkdir(parents=True, exist_ok=False)
+    _save_config(config, output_path)
+    torch.cuda.reset_peak_memory_stats()
+    start = time.perf_counter()
+    with GPUMonitor(output_path / "gpu_utilization.csv", runtime.monitor_gpu) as monitor:
+        report = runner.evaluate(adapter, output_path / "predictions", subset=config.subset)
+        torch.cuda.synchronize()
+    seconds = time.perf_counter()-start
+    timing = {"dataset_setup_seconds": setup_seconds, "model_load_seconds": load_seconds,
+              "pipeline_seconds": seconds, "warmup_seconds": runner.warmup_seconds,
+              "evaluation_seconds": runner.evaluation_seconds,
+              "run_total_seconds": time.perf_counter()-run_start,
+              "input_count": len(report["records"]),
+              "inputs_per_second": len(report["records"])/runner.evaluation_seconds,
+              "gpu": torch.cuda.get_device_name(0), "gpu_monitor": monitor.status,
+              "torch_version": torch.__version__, "python_version": platform.python_version(),
+              "cuda_synchronized": True, **resources, **gpu_memory(), "model": model_info,
+              "timing_scope": "evaluation excludes warmup; previews included; per-input inference is batch-amortized"}
+    (output_path / "timing.json").write_text(json.dumps(timing, indent=2)+"\n", encoding="utf-8")
+    return report
+
+
 def load_config(path: Path) -> Config:
     raw = json.loads(path.read_text(encoding="utf-8"))
     for name in ("manifest", "checkpoint", "bpe_path"):
@@ -153,6 +203,8 @@ def load_config(path: Path) -> Config:
             raw[name] = (path.resolve().parent / raw[name]).resolve()
     if "fragmentation" in raw:
         raw["fragmentation"] = FragmentationConfig(**raw["fragmentation"])
+    if raw.get("runtime") is not None:
+        raw["runtime"] = RuntimeConfig(**raw["runtime"])
     if "fence_widths" in raw:
         raw["fence_widths"] = tuple(raw["fence_widths"])
     return Config(**raw)
