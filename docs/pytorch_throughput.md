@@ -99,9 +99,31 @@ python scripts/prepare_pipeline_pilot.py \
   --count 64 --optimized --output-dir "$SCRATCH/bwlab-throughput-inputs"
 ```
 
-This uses archived pairs for a software/performance pilot, not the full COCO
-benchmark. Use a fresh output path for each command. On an allocated GPU compute
-node, inside `srun`, first compare the reference and tensor-batched paths:
+This selects 64 archived source images, producing 256 fence inputs and 64
+contour inputs. It is a small software/performance pilot, not the 5,000-image
+COCO validation benchmark. Preparation performs no model inference. The first
+equivalence checks use only four inputs per arm, comparing old and new paths.
+
+From the login node, the recommended route is the batch wrapper, which requests
+one GPU and loads Python/OpenCV plus the environment inside the compute job:
+
+```bash
+CHECK_ROOT=$(mktemp -d /scratch/vho/sam3-whole-scene/throughput-check.XXXXXX)
+JOB_ID=$(sbatch --parsable --output="$CHECK_ROOT/slurm-%j.out" \
+  scripts/vulcan_throughput.sbatch equivalence "$PWD" \
+  "$SCRATCH/bwlab-throughput-inputs" "$CHECK_ROOT")
+echo "$JOB_ID"
+```
+
+Inspect the job output and equivalence CSVs before submitting a batch-size sweep.
+Replace `equivalence` with `benchmark` and use a fresh directory for that sweep.
+Both modes stop on failed preflight/checks. No job is submitted by preparation.
+
+Bare `srun python ...` from a login node may allocate a **CPU-only** compute node.
+It does not automatically request a GPU. For manual commands below, first obtain
+a GPU allocation with the required account/partition/resources and load the same
+modules/environment on the compute node. Alternatively, use the wrapper above.
+Within that GPU allocation, compare the reference and tensor-batched paths:
 
 ```bash
 srun python scripts/check_batch_equivalence.py \

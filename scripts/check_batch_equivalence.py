@@ -26,6 +26,8 @@ def main():
     args = parser.parse_args()
     import os
     require_slurm_step(os.environ)
+    if not torch.cuda.is_available():
+        raise RuntimeError("No CUDA GPU allocated. Request --gpus=1 with srun or use scripts/vulcan_throughput.sbatch")
     config = load_config(args.config)
     module = build_data_module(config)
     dataset = module.val_dataset() if config.subset == "val" else module.test_dataset()

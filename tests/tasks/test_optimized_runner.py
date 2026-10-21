@@ -17,6 +17,7 @@ from bwlab.tasks.summary import SummaryTask
 from experiments.sam3_fragmentation.experiment import Config, run
 from tests.helpers import FakeProcessor, FakeSceneModel
 from bwlab.models.proposals import collect_proposals
+from scripts import check_batch_equivalence
 
 
 class BatchAdapter:
@@ -32,6 +33,17 @@ class BatchAdapter:
 
 
 class OptimizedRunnerTests(unittest.TestCase):
+    def test_equivalence_without_gpu_stops_before_loading_data_or_model(self):
+        with patch.dict("os.environ", {"SLURM_JOB_ID": "test", "SLURM_STEP_ID": "0"}), \
+                patch("sys.argv", ["check", "--config", "unused.json", "--output", "unused.csv"]), \
+                patch("torch.cuda.is_available", return_value=False), \
+                patch.object(check_batch_equivalence, "build_data_module") as data, \
+                patch.object(check_batch_equivalence, "load_scene_model") as model:
+            with self.assertRaisesRegex(RuntimeError, "No CUDA GPU allocated"):
+                check_batch_equivalence.main()
+        data.assert_not_called()
+        model.assert_not_called()
+
     def test_batches_warmup_and_first_batch_previews(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
