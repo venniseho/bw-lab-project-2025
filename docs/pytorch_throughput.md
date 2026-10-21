@@ -69,8 +69,30 @@ fair batch-size profiling. `max_inputs` can limit a representative profiling run
 
 Run these yourself on Vulcan after fetching this branch. Use the existing native
 SAM3 environment/checkpoint; no model download or environment replacement is needed.
-First load modules and activate the existing environment as in the pilot guide.
-From the repository checkout, prepare new configs without inference:
+Paths confirmed from the user's Vulcan terminal on 21 October 2026:
+
+- Project Git checkout: `/project/aip-sven/vho/bw-lab-project-2025`.
+- Native Meta SAM3 source: `/project/aip-sven/vho/sam3`.
+- Scratch workspace: `/scratch/vho/sam3-whole-scene` (not a Git checkout).
+- Existing virtual environment: `/scratch/vho/sam3-whole-scene/env`.
+- Existing checkpoint directory: `/scratch/vho/sam3-whole-scene/checkpoints`.
+
+Start in the project checkout and activate the existing environment:
+
+```bash
+cd /project/aip-sven/vho/bw-lab-project-2025
+git fetch origin --prune
+git switch performance
+git pull --ff-only origin performance
+
+module load python/3.12.4
+module load opencv/4.12.0
+source /scratch/vho/sam3-whole-scene/env/bin/activate
+```
+
+The scratch workspace contains environments, checkpoints, logs and run outputs;
+do not run project Git commands there. From the project checkout, prepare new
+configs without inference:
 
 ```bash
 python scripts/prepare_pipeline_pilot.py \
