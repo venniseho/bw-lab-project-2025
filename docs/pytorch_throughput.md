@@ -140,6 +140,38 @@ large run, not a reason to silently loosen the comparison. CPU tests validate
 tensor/PIL preprocessing and prompt/candidate correspondence, not actual SAM3
 GPU numerics. The full GPU checks have not been run by the coding agent.
 
+### Investigate numerical differences before benchmarking
+
+The user's job `1889951` passed the L40S/OpenCV preflight, then reported 108
+strict differences in the four-input fence check. The first 11 pasted rows had
+5–428 changed pixels and score differences from 0 to 0.005859375. This does not
+establish that 108 masks are entirely wrong or identify which optimization is
+responsible. PyTorch does not guarantee bitwise equality between batched and
+individual computations; see [numerical accuracy](https://docs.pytorch.org/docs/2.14/notes/numerical_accuracy.html).
+Small image-wide pixel changes can still substantially affect a tiny mask.
+
+Use the small diagnostic mode, which preserves the strict tolerance but runs
+both arms and isolates each change:
+
+```bash
+DIAG_ROOT=$(mktemp -d /scratch/vho/sam3-whole-scene/throughput-diagnostic.XXXXXX)
+JOB_ID=$(sbatch --parsable --output="$DIAG_ROOT/slurm-%j.out" \
+  scripts/vulcan_throughput.sbatch diagnose "$PWD" \
+  "$SCRATCH/bwlab-throughput-inputs" "$DIAG_ROOT")
+echo "$JOB_ID"
+echo "$DIAG_ROOT"
+```
+
+Each arm saves `diagnostic-CONDITION.csv` and `diagnostic-CONDITION.summary.json`.
+The summary records GPU preprocessing equality, repeated-reference stability,
+tensor path with single images/prompts, image batching alone, prompt batching
+alone, their combination with cuDNN benchmarking disabled, and the requested
+runtime settings. CSVs include mask-to-mask IoU, changed-pixel fraction, mask
+areas, score delta and target-IoU delta; summaries count changed selected
+candidates. The diagnostic job can finish with a failed state because strict
+differences remain, while still writing both arms' evidence. No mask/score
+tolerance is automatically relaxed and no throughput sweep is launched.
+
 Then profile the two arms separately, starting with compilation off:
 
 ```bash

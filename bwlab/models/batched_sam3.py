@@ -8,6 +8,15 @@ import torch
 from bwlab.models.proposals import Proposal, point_grid
 
 
+def _tensor_image(processor, rgb, pin_memory=False):
+    if rgb.dtype != np.uint8 or rgb.ndim != 3 or rgb.shape[2] != 3:
+        raise ValueError("expected uint8 HWC RGB arrays")
+    tensor = torch.from_numpy(np.ascontiguousarray(rgb)).permute(2, 0, 1)
+    if pin_memory and str(processor.device).startswith("cuda"):
+        tensor = tensor.pin_memory()
+    return processor.transform(tensor.to(processor.device, non_blocking=pin_memory))
+
+
 def _tensor_state(model, processor, images, pin_memory=False):
     """Match native processor preprocessing and its interactive feature projections.
 
@@ -15,14 +24,7 @@ def _tensor_state(model, processor, images, pin_memory=False):
     Keep CHW uint8 tensors through transfer, then use its own transform. This
     avoids the PIL round trip and preserves its resize/normalization semantics.
     """
-    pixels = []
-    for rgb in images:
-        if rgb.dtype != np.uint8 or rgb.ndim != 3 or rgb.shape[2] != 3:
-            raise ValueError("expected uint8 HWC RGB arrays")
-        tensor = torch.from_numpy(np.ascontiguousarray(rgb)).permute(2, 0, 1)
-        if pin_memory and str(processor.device).startswith("cuda"):
-            tensor = tensor.pin_memory()
-        pixels.append(processor.transform(tensor.to(processor.device, non_blocking=pin_memory)))
+    pixels = [_tensor_image(processor, rgb, pin_memory) for rgb in images]
     batch = torch.stack(pixels)
     features = model.backbone.forward_image(batch)
     if "sam2_backbone_out" not in features:
