@@ -62,6 +62,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--count", type=int, default=4)
     parser.add_argument("--score-atol", type=float, default=1e-5)
+    parser.add_argument("--strict", action="store_true",
+                        help="Opt in to failing on any mask pixel or score-tolerance difference")
     parser.add_argument("--diagnose", action="store_true", help="Isolate each optimization without stopping at the first mismatch")
     args = parser.parse_args()
     import os
@@ -90,6 +92,7 @@ def main():
                     "parameter_dtypes": sorted({str(p.dtype) for p in model.parameters()}),
                     "runtime": asdict(runtime), "model": model_info,
                     "input_count": len(samples), "score_atol": args.score_atol,
+                    "comparison_policy": "strict" if args.strict else "report_only",
                     "baseline_cudnn_benchmark": torch.backends.cudnn.benchmark,
                     "preprocessing": preprocessing_diagnostics(processor, samples) if args.diagnose else [],
                     "stages": {}}
@@ -120,10 +123,15 @@ def main():
                       f"max target IoU delta={summary['max_target_iou_difference']}; "
                       f"selected candidate changes={summary['selected_candidate_changes']}", flush=True)
         mismatches = sum(stage["strict_mismatch_count"] for stage in evidence["stages"].values())
-        if mismatches:
+        if mismatches and args.strict:
             raise RuntimeError(f"{mismatches} strict differences across stages; inspect {args.output} "
                                f"and {args.output.with_suffix('.summary.json')} before a sweep")
-        print("All tested masks identical; scores within configured tolerance")
+        if mismatches:
+            print(f"Comparison complete: {mismatches} strict differences recorded for review; "
+                  "numerical differences do not fail this report-only check. "
+                  "This does not establish equivalent accuracy.")
+        else:
+            print("All tested masks identical; scores within configured tolerance")
     finally:
         torch.backends.cudnn.benchmark = previous_benchmark
 

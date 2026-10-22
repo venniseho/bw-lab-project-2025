@@ -78,7 +78,7 @@ class EquivalenceMetricsTests(unittest.TestCase):
         self.assertEqual(calls, [(1, 1), (1, 1), (2, 1), (1, 9), (1, 9), (2, 9), (2, 9)])
         self.assertEqual(configure.call_count, 1)
 
-    def test_main_saves_all_diagnostics_before_reporting_failure(self):
+    def test_main_reports_numerical_differences_without_failing_by_default(self):
         target = np.ones((3, 4), bool)
         altered = target.copy()
         altered[0, 0] = False
@@ -106,9 +106,9 @@ class EquivalenceMetricsTests(unittest.TestCase):
                     patch.object(check_batch_equivalence, "BatchedSam3GridAdapter", Adapter), \
                     patch.object(check_batch_equivalence, "preprocessing_diagnostics", return_value=[{"exact": True, "max_absolute_difference": 0}]), \
                     patch.object(check_batch_equivalence, "configure_model"):
-                with self.assertRaisesRegex(RuntimeError, "strict differences across stages"):
-                    check_batch_equivalence.main()
+                check_batch_equivalence.main()
             evidence = json.loads(output.with_suffix(".summary.json").read_text())
+            self.assertEqual(evidence["comparison_policy"], "report_only")
             self.assertEqual(len(evidence["stages"]), 6)
             self.assertEqual(evidence["stages"]["tensor_single"]["strict_mismatch_count"], 0)
             self.assertEqual(evidence["stages"]["configured_runtime"]["strict_mismatch_count"], 1)

@@ -1,4 +1,4 @@
-"""Candidate correspondence and numerical drift diagnostics; no acceptance relaxation."""
+"""Candidate correspondence and numerical drift measurements for prediction-to-prediction reports."""
 import numpy as np
 
 from bwlab.samples import binary_mask

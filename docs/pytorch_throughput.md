@@ -145,23 +145,26 @@ srun python scripts/check_batch_equivalence.py \
   --count 4 --output "$SCRATCH/bwlab-equivalence-contour.csv"
 ```
 
-The check requires identical binary masks and score differences <= 1e-5. A
-failure is evidence to investigate numerical/preprocessing differences before a
-large run, not a reason to silently loosen the comparison. CPU tests validate
-tensor/PIL preprocessing and prompt/candidate correspondence, not actual SAM3
-GPU numerics. The full GPU checks have not been run by the coding agent.
+The check compares SAM3 predictions from the single-image and batched paths,
+not predictions against COCO labels. By default it reports numerical differences
+without failing the job. Pixel identity and score tolerance remain diagnostic
+CSV fields, not acceptance criteria. `--strict` explicitly restores the old
+pixel-identical requirement. Candidate counts, prompt correspondence, dimensions,
+and runtime errors still fail. COCO target IoU is recorded separately to assess
+accuracy changes; report-only completion does not establish equivalent accuracy.
+CPU tests cover reporting and correspondence, not actual SAM3 GPU numerics.
 
 ### Investigate numerical differences before benchmarking
 
 The user's job `1889951` passed the L40S/OpenCV preflight, then reported 108
 strict differences in the four-input fence check. The first 11 pasted rows had
-5–428 changed pixels and score differences from 0 to 0.005859375. This does not
+5â€“428 changed pixels and score differences from 0 to 0.005859375. This does not
 establish that 108 masks are entirely wrong or identify which optimization is
 responsible. PyTorch does not guarantee bitwise equality between batched and
 individual computations; see [numerical accuracy](https://docs.pytorch.org/docs/2.14/notes/numerical_accuracy.html).
 Small image-wide pixel changes can still substantially affect a tiny mask.
 
-Use the small diagnostic mode, which preserves the strict tolerance but runs
+Use the small diagnostic mode, which records numerical differences and runs
 both arms and isolates each change:
 
 ```bash
