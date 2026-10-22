@@ -95,13 +95,24 @@ do not run project Git commands there. From the project checkout, prepare new
 configs without inference:
 
 ```bash
-python scripts/prepare_pipeline_pilot.py \
-  --count 64 --optimized --output-dir "$SCRATCH/bwlab-throughput-inputs"
+python scripts/prepare_coco_validation.py \
+  --coco-root "$SCRATCH/datasets/coco" --download --count 64 \
+  --output-dir "$SCRATCH/bwlab-coco-throughput-inputs"
 ```
 
-This selects 64 archived source images, producing 256 fence inputs and 64
-contour inputs. It is a small software/performance pilot, not the 5,000-image
-COCO validation benchmark. Preparation performs no model inference. The first
+This downloads a seeded random subset of 64 official COCO val2017 sources directly
+to Vulcan scratch, plus the official annotation archive (containing train/val
+annotations; only the validation instance JSON is extracted). Existing files are
+reused. No training images are downloaded. Omit `--download` to use existing data.
+The loader decodes masks in memory; it does not write mask PNGs.
+
+For this throughput pilot, select the smallest-ID noncrowd instance per source,
+without size/shape ranking. Sources without noncrowd instances are reported,
+not replaced. `selection.json` records all selected source IDs and counts. Up to
+256 fence inputs and 64 contour inputs result. Annotation SHA256 is recorded
+and checked on loading/replay. This is a software/performance pilot, not the
+full 5,000-image scientific benchmark or an all-instance evaluation. Preparation
+performs no model inference. The first
 equivalence checks use only four inputs per arm, comparing old and new paths.
 
 From the login node, the recommended route is the batch wrapper, which requests
@@ -111,7 +122,7 @@ one GPU and loads Python/OpenCV plus the environment inside the compute job:
 CHECK_ROOT=$(mktemp -d /scratch/vho/sam3-whole-scene/throughput-check.XXXXXX)
 JOB_ID=$(sbatch --parsable --output="$CHECK_ROOT/slurm-%j.out" \
   scripts/vulcan_throughput.sbatch equivalence "$PWD" \
-  "$SCRATCH/bwlab-throughput-inputs" "$CHECK_ROOT")
+  "$SCRATCH/bwlab-coco-throughput-inputs" "$CHECK_ROOT")
 echo "$JOB_ID"
 ```
 
@@ -127,10 +138,10 @@ Within that GPU allocation, compare the reference and tensor-batched paths:
 
 ```bash
 srun python scripts/check_batch_equivalence.py \
-  --config "$SCRATCH/bwlab-throughput-inputs/fence.json" \
+  --config "$SCRATCH/bwlab-coco-throughput-inputs/fence.json" \
   --count 4 --output "$SCRATCH/bwlab-equivalence-fence.csv"
 srun python scripts/check_batch_equivalence.py \
-  --config "$SCRATCH/bwlab-throughput-inputs/fragmentation.json" \
+  --config "$SCRATCH/bwlab-coco-throughput-inputs/fragmentation.json" \
   --count 4 --output "$SCRATCH/bwlab-equivalence-contour.csv"
 ```
 
@@ -157,7 +168,7 @@ both arms and isolates each change:
 DIAG_ROOT=$(mktemp -d /scratch/vho/sam3-whole-scene/throughput-diagnostic.XXXXXX)
 JOB_ID=$(sbatch --parsable --output="$DIAG_ROOT/slurm-%j.out" \
   scripts/vulcan_throughput.sbatch diagnose "$PWD" \
-  "$SCRATCH/bwlab-throughput-inputs" "$DIAG_ROOT")
+  "$SCRATCH/bwlab-coco-throughput-inputs" "$DIAG_ROOT")
 echo "$JOB_ID"
 echo "$DIAG_ROOT"
 ```
@@ -176,11 +187,11 @@ Then profile the two arms separately, starting with compilation off:
 
 ```bash
 srun python scripts/benchmark_pipeline.py \
-  --config "$SCRATCH/bwlab-throughput-inputs/fence.json" \
+  --config "$SCRATCH/bwlab-coco-throughput-inputs/fence.json" \
   --max-inputs 64 --workers 2 --batch-sizes 1 2 4 8 16 32 64 \
   --output "$SCRATCH/bwlab-fence-batches"
 srun python scripts/benchmark_pipeline.py \
-  --config "$SCRATCH/bwlab-throughput-inputs/fragmentation.json" \
+  --config "$SCRATCH/bwlab-coco-throughput-inputs/fragmentation.json" \
   --max-inputs 64 --workers 2 --batch-sizes 1 2 4 8 16 32 64 \
   --output "$SCRATCH/bwlab-contour-batches"
 ```
@@ -241,8 +252,8 @@ used for the prior GPU jobs. It uses the active Python and inherited environment
 
 ```bash
 python -m experiments.sam3_fragmentation.launch \
-  --configs "$SCRATCH/bwlab-throughput-inputs/fence.json" \
-            "$SCRATCH/bwlab-throughput-inputs/fragmentation.json" \
+  --configs "$SCRATCH/bwlab-coco-throughput-inputs/fence.json" \
+            "$SCRATCH/bwlab-coco-throughput-inputs/fragmentation.json" \
   --output "$SCRATCH/bwlab-parallel-runs"
 ```
 

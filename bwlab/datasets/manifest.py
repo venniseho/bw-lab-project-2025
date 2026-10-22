@@ -12,8 +12,9 @@ from .image_mask import ImageMaskDataset
 def read_records(manifest: Path) -> list[dict]:
     records = json.loads(manifest.read_text(encoding="utf-8"))
     for record in records:
-        for field in ("image_path", "mask_path"):
-            record[field] = str((manifest.resolve().parent / record[field]).resolve())
+        for field in ("image_path", "mask_path", "annotations_path"):
+            if field in record:
+                record[field] = str((manifest.resolve().parent / record[field]).resolve())
     return records
 
 
@@ -31,5 +32,12 @@ class ManifestDataModule(DataModule):
                 if source in source_splits and source_splits[source] != subset:
                     raise ValueError(f"source image appears in multiple splits: {source}")
                 source_splits[source] = subset
-            datasets[subset] = ImageMaskDataset(records, transform=transform)
+            coco_records = ["annotations_path" in record for record in records]
+            if any(coco_records) and not all(coco_records):
+                raise ValueError("do not mix COCO and image/mask records in one manifest")
+            if any(coco_records):
+                from .coco_manifest import CocoManifestDataset
+                datasets[subset] = CocoManifestDataset(records, transform=transform)
+            else:
+                datasets[subset] = ImageMaskDataset(records, transform=transform)
         super().__init__(datasets, seed=seed)
