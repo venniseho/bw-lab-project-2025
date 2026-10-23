@@ -11,6 +11,7 @@ proposal-export task reuses the working native SAM3 workflow.
 - [Architecture map and reference correspondence](docs/architecture.md)
 - [Supervisor update draft and next steps](docs/supervisor_update.md)
 - [Timed ten-image Vulcan pilot](docs/timed_pipeline_pilot.md)
+- [PyTorch batching, throughput profiling and Submitit launcher](docs/pytorch_throughput.md)
 - [Configured fence/contour experiment](experiments/sam3_fragmentation/README.md)
 - [Pipeline usage and sample contract](docs/stimulus_pipeline.md)
 - [Branch inventory, preserved algorithms, and merge review](docs/refactor_inventory.md)

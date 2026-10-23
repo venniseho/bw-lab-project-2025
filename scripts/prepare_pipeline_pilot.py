@@ -40,6 +40,9 @@ def main(argv=None) -> None:
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--count", type=int, default=10)
     parser.add_argument("--output-dir", type=Path, required=True, help="New directory")
+    parser.add_argument("--optimized", action="store_true", help="Generate tensor-batched, CSV-first runtime configs")
+    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--checkpoint", type=Path,
                         default=Path("/scratch/vho/sam3-whole-scene/checkpoints/sam3.pt"))
     args = parser.parse_args(argv)
@@ -51,6 +54,10 @@ def main(argv=None) -> None:
         config = {"manifest": str(manifest), "condition": condition, "seed": 42,
                   "points_per_side": 3, "num_workers": 0, "batch_size": 1,
                   "checkpoint": str(args.checkpoint.resolve())}
+        if args.optimized:
+            config.update(batch_size=args.batch_size, num_workers=args.workers,
+                          runtime={"batched": True, "preview_batches": 1, "warmup_batches": 1,
+                                   "cudnn_benchmark": True, "compile_encoder": False})
         (args.output_dir / f"{condition}.json").write_text(
             json.dumps(config, indent=2)+"\n", encoding="utf-8")
     print(f"Selected {len(records)} distinct images; fence inputs={4*len(records)}, contour inputs={len(records)}")

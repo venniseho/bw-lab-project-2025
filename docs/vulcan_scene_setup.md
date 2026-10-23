@@ -1,5 +1,15 @@
 # Vulcan one-image SAM3 setup: automatic 3x3 visual grid
 
+## Current path reference — confirmed 21 October 2026
+
+The active project Git checkout is `/project/aip-sven/vho/bw-lab-project-2025`.
+The native Meta source checkout is `/project/aip-sven/vho/sam3`.
+`/scratch/vho/sam3-whole-scene` is the runtime workspace, not a Git checkout;
+its existing environment is `env/` and its model files are in `checkpoints/`.
+For throughput validation use branch `performance` and the current
+[throughput guide](pytorch_throughput.md). The sections below describe the older
+one-image setup and its historical branch/copy instructions.
+
 Nine positive points are placed automatically; each is an independent visual query with `multimask_output=True`. Typically this yields 27 raw masks; actual output count is recorded. No clicks, text prompts, model replacement or GT-based mask selection. These are qualitative proposals: small objects can be missed, and object parts/background can be proposed.
 
 Following failure of job `1390350`, image features are computed once with `Sam3Processor(model).set_image(PIL_RGB_image)` and reused by nine `model.predict_inst(state, ...)` calls. The integrated tracker has no standalone backbone. Model transfer to CUDA preserves native dtypes; a blanket float32 cast would discard imaginary components of complex rotary-position buffers. The integration was verified against the user's installed Meta source revision [`0570b3a5be9c4e694f23d85232fb55f4a6f1f7fc`](https://github.com/facebookresearch/sam3/tree/0570b3a5be9c4e694f23d85232fb55f4a6f1f7fc), reported at `/project/aip-sven/vho/sam3` (`~/projects/aip-sven/vho/sam3`). Runtime checks inspect installed API signatures and require aligned interactive features; processor and model source hashes are recorded. Local tests mock the native interaction; actual corrected GPU execution has not been performed.
