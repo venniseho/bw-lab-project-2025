@@ -9,8 +9,14 @@
 #SBATCH --mem=32G
 #SBATCH --time=00:30:00
 set -euo pipefail
-[[ $# -eq 4 ]] || { echo 'Usage: script equivalence|diagnose|benchmark repo configs output' >&2; exit 2; }
+[[ $# -ge 4 && $# -le 5 ]] || { echo 'Usage: script equivalence|diagnose|benchmark repo configs output [fence|fragmentation|both]' >&2; exit 2; }
 mode=$1
+arm=${5:-both}
+case "$arm" in
+    both) conditions=(fence fragmentation) ;;
+    fence|fragmentation) conditions=("$arm") ;;
+    *) echo "Invalid condition: $arm" >&2; exit 2 ;;
+esac
 [[ "$mode" == equivalence || "$mode" == diagnose || "$mode" == benchmark ]] || { echo 'Invalid mode' >&2; exit 2; }
 repo=$(realpath "$2")
 configs=$(realpath "$3")
@@ -26,7 +32,7 @@ git rev-parse HEAD
 hostname
 srun python -c "import cv2, torch; assert torch.cuda.is_available(), 'No CUDA GPU allocated'; print('OpenCV:', cv2.__version__); print('GPU:', torch.cuda.get_device_name(0))"
 failed=0
-for condition in fence fragmentation; do
+for condition in "${conditions[@]}"; do
     if [[ "$mode" == diagnose ]]; then
         # Complete both small diagnostic arms even if strict equivalence fails.
         srun python scripts/check_batch_equivalence.py \

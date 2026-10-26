@@ -26,13 +26,14 @@ def main():
     args = parser.parse_args()
     import os
     require_slurm_step(os.environ)
-    if min(args.batch_sizes) < 1 or args.workers < 0 or args.max_inputs < max(args.batch_sizes):
-        parser.error("positive batch sizes and max-inputs >= largest batch size required")
+    if min(args.batch_sizes) < 1 or args.workers < 0 or args.max_inputs < 1:
+        parser.error("positive batch sizes and max-inputs required")
     config = load_config(args.config)
     module = build_data_module(config)
     available = len(module.val_dataset() if config.subset == "val" else module.test_dataset())
-    if min(args.max_inputs, available) < max(args.batch_sizes):
-        parser.error(f"dataset has only {available} inputs; cannot benchmark the requested full batches")
+    usable = min(args.max_inputs, available)
+    if usable < 1:
+        parser.error("dataset has no inputs to benchmark")
     args.output.mkdir(parents=True, exist_ok=False)
     runtime = RuntimeConfig(compile_encoder=args.compile,
                             cudnn_benchmark=not args.no_cudnn_benchmark,
@@ -43,6 +44,12 @@ def main():
         writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
         for size in args.batch_sizes:
+            if size > usable:
+                writer.writerow({"batch_size": size, "status": "skipped_insufficient_inputs",
+                                 "input_count": usable})
+                stream.flush()
+                print(f"batch={size}: skipped; only {usable} inputs available", flush=True)
+                continue
             current = replace(config, batch_size=size, num_workers=args.workers,
                               max_inputs=args.max_inputs, runtime=runtime)
             config_path = args.output / f"batch-{size}.json"

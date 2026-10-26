@@ -158,7 +158,7 @@ CPU tests cover reporting and correspondence, not actual SAM3 GPU numerics.
 
 The user's job `1889951` passed the L40S/OpenCV preflight, then reported 108
 strict differences in the four-input fence check. The first 11 pasted rows had
-5â€“428 changed pixels and score differences from 0 to 0.005859375. This does not
+5Ã¢â‚¬â€œ428 changed pixels and score differences from 0 to 0.005859375. This does not
 establish that 108 masks are entirely wrong or identify which optimization is
 responsible. PyTorch does not guarantee bitwise equality between batched and
 individual computations; see [numerical accuracy](https://docs.pytorch.org/docs/2.14/notes/numerical_accuracy.html).
@@ -288,3 +288,32 @@ Reference API: native SAM3 revision
 [cuDNN settings](https://docs.pytorch.org/docs/2.14/backends.html#torch.backends.cudnn.benchmark),
 [compilation](https://docs.pytorch.org/tutorials/intermediate/torch_compile_tutorial.html),
 [Submitit](https://github.com/facebookincubator/submitit).
+
+### Resume fragmentation and inspect existing timing results
+
+A 64-source COCO subset can contain fewer usable noncrowd instance samples.
+The sweep records `skipped_insufficient_inputs` for batch sizes larger than the
+usable input count, and continues the smaller candidates. It does not duplicate
+images or replace excluded sources. An optional fifth wrapper argument selects
+`fence` or `fragmentation`; the default remains both. To rerun only fragmentation:
+
+```bash
+BENCH_ROOT=$(mktemp -d /scratch/vho/sam3-whole-scene/fragmentation-benchmark.XXXXXX)
+JOB_ID=$(sbatch --parsable --output="$BENCH_ROOT/slurm-%j.out" \
+  scripts/vulcan_throughput.sbatch benchmark "$PWD" \
+  "$SCRATCH/bwlab-coco-throughput-inputs" "$BENCH_ROOT" fragmentation)
+```
+
+Inspect the already completed fence sweep without allocating a GPU:
+
+```bash
+python scripts/summarize_batch_timings.py \
+  --benchmark-dir /scratch/vho/sam3-whole-scene/coco-benchmark.8ZBwOb
+```
+
+Embedding time includes GPU preprocessing/transfer and feature projections.
+Query time includes native prediction and CPU mask packing, not just decoder
+kernels. Both are nested within inference time; do not add them to inference.
+Worker transform timings overlap computation, and are not additive wall time.
+These logs can locate a broad bottleneck but cannot isolate encoder kernels or
+prove GPU saturation. Use a dedicated profiler if finer attribution is needed.
