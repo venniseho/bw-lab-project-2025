@@ -15,6 +15,16 @@ from scripts.prepare_coco_validation import download, main, select_records
 
 
 class CocoManifestTests(TestCase):
+    def test_eligible_pool_produces_exact_distinct_source_count(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data, path = self.fixture(root)
+            records, ids = select_records(data, 1, 42, root, path, "digest", eligible_only=True)
+            self.assertEqual(ids, [1])
+            self.assertEqual(len(records), 1)
+            with self.assertRaisesRegex(ValueError, "eligible sources"):
+                select_records(data, 2, 42, root, path, "digest", eligible_only=True)
+
     def test_download_is_atomic_and_reuses_existing_files(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "val2017" / "image.jpg"

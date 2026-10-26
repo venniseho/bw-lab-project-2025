@@ -48,16 +48,20 @@ def annotations(root, allow_download):
     return path
 
 
-def select_records(data, count, seed, root, annotation_path, digest):
+def select_records(data, count, seed, root, annotation_path, digest, *, eligible_only=False):
     """Seeded source subset; smallest noncrowd annotation ID per image, no size filter."""
     images = sorted(data["images"], key=lambda image: image["id"])
     if not 1 <= count <= len(images):
         raise ValueError(f"count must be between 1 and {len(images)}")
-    selected = sorted(random.Random(seed).sample(images, count), key=lambda image: image["id"])
     instances = {}
     for annotation in data["annotations"]:
         if annotation.get("iscrowd") == 0:
             instances.setdefault(annotation["image_id"], []).append(annotation)
+    if eligible_only:
+        images = [image for image in images if image["id"] in instances]
+        if count > len(images):
+            raise ValueError(f"Need {count} eligible sources; only {len(images)} available")
+    selected = sorted(random.Random(seed).sample(images, count), key=lambda image: image["id"])
     records = []
     for image in selected:
         candidates = instances.get(image["id"], [])
@@ -82,6 +86,8 @@ def main(argv=None):
     parser.add_argument("--coco-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--count", type=int, default=64)
+    parser.add_argument("--eligible-only", action="store_true",
+                        help="Select exactly count sources with a noncrowd annotation; throughput sampling only")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--download", action="store_true")
     parser.add_argument("--checkpoint", type=Path,
@@ -93,7 +99,7 @@ def main(argv=None):
     path = annotations(root, args.download)
     raw = path.read_bytes()
     records, image_ids = select_records(json.loads(raw), args.count, args.seed, root, path,
-                                        hashlib.sha256(raw).hexdigest())
+                                        hashlib.sha256(raw).hexdigest(), eligible_only=args.eligible_only)
     if not records:
         raise ValueError("Selected sources have no noncrowd instances")
     for record in records:
@@ -107,6 +113,7 @@ def main(argv=None):
     write_json(manifest, records)
     write_json(args.output_dir / "selection.json", {
         "dataset": "COCO val2017", "source_image_ids": image_ids,
+        "sampling_pool": "noncrowd_annotated_sources" if args.eligible_only else "all_validation_sources",
         "requested_sources": args.count, "object_samples": len(records),
         "sources_without_noncrowd_instance": args.count - len(records),
         "policy": "one smallest-ID noncrowd instance per source; throughput pilot only"})

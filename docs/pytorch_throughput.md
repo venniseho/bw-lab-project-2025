@@ -158,7 +158,7 @@ CPU tests cover reporting and correspondence, not actual SAM3 GPU numerics.
 
 The user's job `1889951` passed the L40S/OpenCV preflight, then reported 108
 strict differences in the four-input fence check. The first 11 pasted rows had
-5Ã¢â‚¬â€œ428 changed pixels and score differences from 0 to 0.005859375. This does not
+5ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“428 changed pixels and score differences from 0 to 0.005859375. This does not
 establish that 108 masks are entirely wrong or identify which optimization is
 responsible. PyTorch does not guarantee bitwise equality between batched and
 individual computations; see [numerical accuracy](https://docs.pytorch.org/docs/2.14/notes/numerical_accuracy.html).
@@ -317,3 +317,17 @@ kernels. Both are nested within inference time; do not add them to inference.
 Worker transform timings overlap computation, and are not additive wall time.
 These logs can locate a broad bottleneck but cannot isolate encoder kernels or
 prove GPU saturation. Use a dedicated profiler if finer attribution is needed.
+
+### Uniform 512-source sweep
+
+Use `prepare_coco_validation.py --count 512 --eligible-only` for exactly 512
+sources with noncrowd annotations. This explicit throughput-only sampling pool
+is recorded in selection.json; do not describe it as an unfiltered COCO accuracy
+benchmark. No size, shape, or model score ranking is applied. Both arms use the
+same 512 distinct sources: fragmentation has 512 inputs and fence has 2048
+(all four conditions). Both counts are divisible by batch sizes 1 through 64.
+The wrapper's optional sixth argument sets max-inputs; pass `both 2048` so the
+fence arm is not truncated to 512 inputs. For this larger sweep, request
+`sbatch --time=01:00:00` rather than using the default 30-minute limit.
+Preparation downloads source JPEGs only; transforms remain in memory. Existing
+JPEGs and annotations are reused. Use new config and result directories.

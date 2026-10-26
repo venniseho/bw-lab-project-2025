@@ -9,9 +9,11 @@
 #SBATCH --mem=32G
 #SBATCH --time=00:30:00
 set -euo pipefail
-[[ $# -ge 4 && $# -le 5 ]] || { echo 'Usage: script equivalence|diagnose|benchmark repo configs output [fence|fragmentation|both]' >&2; exit 2; }
+[[ $# -ge 4 && $# -le 6 ]] || { echo 'Usage: script equivalence|diagnose|benchmark repo configs output [fence|fragmentation|both] [max-inputs]' >&2; exit 2; }
 mode=$1
 arm=${5:-both}
+max_inputs=${6:-64}
+[[ "$max_inputs" =~ ^[1-9][0-9]*$ ]] || { echo "max-inputs must be positive" >&2; exit 2; }
 case "$arm" in
     both) conditions=(fence fragmentation) ;;
     fence|fragmentation) conditions=("$arm") ;;
@@ -46,7 +48,7 @@ for condition in "${conditions[@]}"; do
             --output "$output/equivalence-$condition.csv"
     else
         srun python scripts/benchmark_pipeline.py \
-            --config "$configs/$condition.json" --max-inputs 64 --workers 2 \
+            --config "$configs/$condition.json" --max-inputs "$max_inputs" --workers 2 \
             --batch-sizes 1 2 4 8 16 32 64 --output "$output/$condition"
     fi
 done
