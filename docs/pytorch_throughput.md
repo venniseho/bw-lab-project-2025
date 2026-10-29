@@ -158,7 +158,7 @@ CPU tests cover reporting and correspondence, not actual SAM3 GPU numerics.
 
 The user's job `1889951` passed the L40S/OpenCV preflight, then reported 108
 strict differences in the four-input fence check. The first 11 pasted rows had
-5ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“428 changed pixels and score differences from 0 to 0.005859375. This does not
+5ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ428 changed pixels and score differences from 0 to 0.005859375. This does not
 establish that 108 masks are entirely wrong or identify which optimization is
 responsible. PyTorch does not guarantee bitwise equality between batched and
 individual computations; see [numerical accuracy](https://docs.pytorch.org/docs/2.14/notes/numerical_accuracy.html).
@@ -331,3 +331,18 @@ fence arm is not truncated to 512 inputs. For this larger sweep, request
 `sbatch --time=01:00:00` rather than using the default 30-minute limit.
 Preparation downloads source JPEGs only; transforms remain in memory. Existing
 JPEGs and annotations are reused. Use new config and result directories.
+
+### Packed GPU input preparation
+
+The batched adapter packs the batch's uint8 RGB pixels on the CPU and transfers
+that buffer to the GPU once. It groups images by original dimensions, applies
+the installed native processor to BCHW tensors per group, and restores input
+order before the encoder. Same-size inputs use one native transform call.
+Variable sizes still require shape groups; unique shapes become singleton
+groups. No padding, interpolation settings, or normalization are changed.
+The grouping uses small Python loops for bookkeeping; it does not eliminate
+all per-image CPU handling or implement batched fence/fragmentation transforms.
+CPU preprocessing matches the native per-image reference in regression tests;
+actual CUDA parity and throughput must be measured on Vulcan. This change alone
+does not establish a speedup. The diagnostic now checks this actual batched
+preprocessing path against native single-image preprocessing.

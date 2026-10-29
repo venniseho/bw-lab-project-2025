@@ -14,7 +14,7 @@ from torchvision.transforms import v2
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bwlab.infrastructure import require_slurm_step
 from bwlab.models import Sam3GridAdapter
-from bwlab.models.batched_sam3 import BatchedSam3GridAdapter, _tensor_image
+from bwlab.models.batched_sam3 import BatchedSam3GridAdapter, _tensor_images
 from bwlab.models.sam3 import load_scene_model
 from bwlab.runtime import configure_model, RuntimeConfig
 from experiments.sam3_fragmentation.experiment import build_data_module, load_config
@@ -28,10 +28,10 @@ FIELDS = ("stage", "__key__", "proposal_id", "different_pixels", "different_frac
 
 def preprocessing_diagnostics(processor, samples):
     rows = []
-    for sample in samples:
+    batch = _tensor_images(processor, [sample["image"] for sample in samples])
+    for sample, tensor in zip(samples, batch):
         rgb = sample["image"]
         native = processor.transform(v2.functional.to_image(Image.fromarray(rgb)).to(processor.device))
-        tensor = _tensor_image(processor, rgb)
         rows.append({"__key__": sample["__key__"], "exact": torch.equal(native, tensor),
                      "max_absolute_difference": float((native-tensor).abs().max().item())})
     return rows

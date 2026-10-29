@@ -7,7 +7,7 @@ import torch
 from torchvision.transforms import v2
 from PIL import Image
 
-from bwlab.models.batched_sam3 import BatchedSam3GridAdapter, _tensor_state
+from bwlab.models.batched_sam3 import BatchedSam3GridAdapter, _tensor_state, _tensor_images
 from bwlab.runtime import RuntimeConfig, configure_model
 
 
@@ -50,6 +50,32 @@ def processor():
 
 
 class BatchTests(unittest.TestCase):
+    def test_batched_preprocessing_groups_shapes_and_restores_order(self):
+        rng = np.random.default_rng(41)
+        images = [rng.integers(0, 256, (h, w, 3), dtype=np.uint8)
+                  for h, w in [(7, 12), (10, 5), (7, 12), (1, 9)]]
+        # Exercise a noncontiguous input, too.
+        images[2] = images[2][:, ::-1]
+        native = processor()
+        expected = torch.stack([native.transform(v2.functional.to_image(Image.fromarray(im)))
+                                for im in images])
+        shapes = []
+        def transform(batch):
+            shapes.append(tuple(batch.shape))
+            return native.transform(batch)
+        actual = _tensor_images(SimpleNamespace(device="cpu", transform=transform), images)
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+        self.assertEqual(shapes, [(2, 3, 7, 12), (1, 3, 10, 5), (1, 3, 1, 9)])
+
+    def test_equal_size_images_use_one_native_transform_call(self):
+        native = processor()
+        transform = unittest.mock.Mock(wraps=native.transform)
+        images = [np.full((10, 15, 3), value, np.uint8) for value in (0, 127, 255)]
+        result = _tensor_images(SimpleNamespace(device="cpu", transform=transform), images)
+        self.assertEqual(transform.call_count, 1)
+        self.assertEqual(transform.call_args.args[0].shape, (3, 3, 10, 15))
+        self.assertEqual(result.shape, (3, 3, 8, 8))
+
     def test_tensor_preprocessing_matches_native_pil_and_projects_once(self):
         rng = np.random.default_rng(12)
         images = [rng.integers(0, 256, (h, w, 3), dtype=np.uint8) for h, w in [(7, 12), (10, 5)]]

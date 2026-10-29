@@ -17,6 +17,40 @@ def _tensor_image(processor, rgb, pin_memory=False):
     return processor.transform(tensor.to(processor.device, non_blocking=pin_memory))
 
 
+def _tensor_images(processor, images, pin_memory=False):
+    """One packed uint8 transfer; native BCHW preprocessing per source shape.
+
+    Variable-size images cannot form a rectangular tensor before resizing.
+    Packing avoids padding and preserves native interpolation at image edges.
+    Shape groups preserve sample order when reassembled for the encoder.
+    """
+    if not images:
+        raise ValueError("nonempty image batch required")
+    groups = {}
+    offset = 0
+    for index, rgb in enumerate(images):
+        if rgb.dtype != np.uint8 or rgb.ndim != 3 or rgb.shape[2] != 3:
+            raise ValueError("expected uint8 HWC RGB arrays")
+        groups.setdefault(rgb.shape, []).append((index, offset, rgb.size))
+        offset += rgb.size
+    packed = torch.from_numpy(np.concatenate([rgb.reshape(-1) for rgb in images]))
+    if pin_memory and str(processor.device).startswith("cuda"):
+        packed = packed.pin_memory()
+    packed = packed.to(processor.device, non_blocking=pin_memory)
+    pixels = [None] * len(images)
+    for shape, members in groups.items():
+        batch = torch.stack([packed[start:start+length].reshape(shape)
+                             for _, start, length in members]).permute(0, 3, 1, 2)
+        transformed = processor.transform(batch)
+        if transformed.ndim != 4 or len(transformed) != len(members):
+            raise ValueError("native processor must preserve the image batch dimension")
+        if len(groups) == 1:
+            return transformed
+        for (index, _, _), pixel in zip(members, transformed.unbind(0)):
+            pixels[index] = pixel
+    return torch.stack(pixels)
+
+
 def _tensor_state(model, processor, images, pin_memory=False):
     """Match native processor preprocessing and its interactive feature projections.
 
@@ -24,8 +58,7 @@ def _tensor_state(model, processor, images, pin_memory=False):
     Keep CHW uint8 tensors through transfer, then use its own transform. This
     avoids the PIL round trip and preserves its resize/normalization semantics.
     """
-    pixels = [_tensor_image(processor, rgb, pin_memory) for rgb in images]
-    batch = torch.stack(pixels)
+    batch = _tensor_images(processor, images, pin_memory)
     features = model.backbone.forward_image(batch)
     if "sam2_backbone_out" not in features:
         raise RuntimeError("native SAM3 returned no interactive backbone features")
