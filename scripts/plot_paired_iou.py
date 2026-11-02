@@ -13,7 +13,7 @@ import numpy as np
 
 
 CONDITIONS = ("light", "medium", "heavy", "fragmentation")
-COLORS = ("#009E73", "#E69F00", "#D55E00", "#CC79A7")
+COLORS = ("#007A52", "#B86B00", "#B53B00", "#8E397A")
 
 
 def read_scores(path):
@@ -66,7 +66,7 @@ def plot(fence_run, fragmentation_run, output):
                                  "delta_iou": after-before})
     audit = {}
     fig, axis = plt.subplots(figsize=(7.5, 7.5), layout="constrained")
-    panels, axes = plt.subplots(2, 2, figsize=(10, 10), layout="constrained", sharex=True, sharey=True)
+    panels, axes = plt.subplots(2, 2, figsize=(10.5, 10.8), sharex=True, sharey=True)
     handles = []
     for condition, color, panel in zip(CONDITIONS, COLORS, axes.flat):
         sources, x, y = pairs[condition]
@@ -76,9 +76,12 @@ def plot(fence_run, fragmentation_run, output):
                             "mean_delta_iou": float(np.mean(y-x)),
                             "below_diagonal": int(np.sum(y < x)),
                             "equal": int(np.sum(y == x)),
+                            "both_exactly_zero": int(np.sum((x == 0) & (y == 0))),
+                            "clean_zero_transformed_positive": int(np.sum((x == 0) & (y > 0))),
+                            "clean_positive_transformed_zero": int(np.sum((x > 0) & (y == 0))),
                             "above_diagonal": int(np.sum(y > x))}
         for ax in (axis, panel):
-            ax.scatter(x, y, color=color, s=8, alpha=0.17, linewidths=0, rasterized=True)
+            ax.scatter(x, y, color=color, s=9, alpha=0.60, linewidths=0, rasterized=True)
         handles.append(Line2D([], [], marker="o", color=color, linestyle="",
                               label=f"{condition.capitalize()} (n={len(sources):,})"))
         panel.set_title(f"{condition.capitalize()} (n={len(sources):,})")
@@ -95,13 +98,14 @@ def plot(fence_run, fragmentation_run, output):
     axis.legend(handles=handles, loc="upper left", fontsize=9)
     fig.suptitle("SAM3: clean versus transformed target IoU")
     panels.suptitle("SAM3: paired IoU by transformation")
-    panels.supxlabel("Clean-image full-target IoU")
-    panels.supylabel("Transformed-image full-target IoU")
+    panels.subplots_adjust(left=0.10, right=0.98, bottom=0.14, top=0.92, hspace=0.20, wspace=0.13)
+    panels.supxlabel("Clean-image full-target IoU", y=0.075)
+    panels.supylabel("Transformed-image full-target IoU", x=0.012)
     note = ("One point per matched source and condition; no jitter. Below diagonal = lower target IoU.\n"
             "Highest-score grid candidate selected independently in each condition; selected object may change.")
     fig.supxlabel("Clean-image full-target IoU\n\n"+note, fontsize=9)
     axis.set_xlabel("")
-    panels.text(0.5, -0.015, note, ha="center", fontsize=9)
+    panels.text(0.5, 0.015, note, ha="center", va="bottom", fontsize=8)
     for figure, stem in ((fig, "paired_iou"), (panels, "paired_iou_by_condition")):
         for extension in ("png", "svg"):
             path = output / f"{stem}.{extension}"
