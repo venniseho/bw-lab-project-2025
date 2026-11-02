@@ -9,7 +9,12 @@
 #SBATCH --mem=32G
 #SBATCH --time=00:15:00
 set -euo pipefail
-[[ $# -eq 3 ]] || { echo 'Usage: script repo full-run-root new-output-directory' >&2; exit 2; }
+[[ $# -ge 3 && $# -le 4 ]] || { echo 'Usage: script repo full-run-root new-output-directory [all-points]' >&2; exit 2; }
+extra_args=()
+if [[ $# -eq 4 ]]; then
+    [[ "$4" == all-points ]] || { echo 'Expected all-points' >&2; exit 2; }
+    extra_args=(--all-points)
+fi
 repo=$(realpath "$1")
 runs=$(realpath "$2")
 output=$(realpath -m "$3")
@@ -23,4 +28,4 @@ git rev-parse HEAD
 hostname
 srun python scripts/export_condition_examples.py \
     --fence-run "$runs/run-000" --fragmentation-run "$runs/run-001" \
-    --count 3 --output "$output"
+    --count 3 --output "$output" "${extra_args[@]}"

@@ -48,6 +48,58 @@ def tile(image, title, prompts=()):
     return panel
 
 
+def save_point_details(rgb, target, proposals, chosen, source, condition, output, number):
+    """Nine prompt rows, each with its input dot and all three candidates."""
+    groups = {}
+    for proposal in proposals:
+        groups.setdefault(proposal.metadata["grid_point_index"], []).append(proposal)
+    for candidates in groups.values():
+        if sorted(p.metadata["candidate_index"] for p in candidates) != [0, 1, 2]:
+            raise ValueError("Expected all three candidates per prompt")
+        if any(p.metadata["point_xy"] != candidates[0].metadata["point_xy"] for p in candidates):
+            raise ValueError("Candidates from one query must have the same prompt")
+    sheet = Image.new("RGB", (340*4, 65+285*(len(groups)+1)), "white")
+    ImageDraw.Draw(sheet).text((10, 8),
+        f"{source} | {condition} | NEWLY RECOMPUTED\n"
+        "Each row is one independent positive dot. Columns: input, candidate 0, candidate 1, candidate 2.\n"
+        "Green = candidate mask; gold border = globally score-selected mask. IoU uses labelled full target.", fill="black")
+    header = [tile(Image.fromarray(rgb), "All independent prompt locations", [p.metadata for p in proposals]),
+              tile(overlay(rgb, target, (220, 0, 220)), "Labelled target (magenta)"),
+              tile(overlay(rgb, chosen.mask(), (0, 220, 80)), "Globally score-selected prediction", [chosen.metadata])]
+    for column, panel in enumerate(header):
+        sheet.paste(panel, (column*340, 65))
+    rows = []
+    for position, (grid, candidates) in enumerate(sorted(groups.items())):
+        metadata = candidates[0].metadata
+        x, y = np.rint(metadata["point_xy"]).astype(int)
+        inside = bool(target[y, x]) if 0 <= y < target.shape[0] and 0 <= x < target.shape[1] else False
+        panel = tile(Image.fromarray(rgb), f"G{grid}: independent positive dot\nDot inside full target: {inside}", [metadata])
+        top = 65+(position+1)*285
+        sheet.paste(panel, (0, top))
+        for candidate in sorted(candidates, key=lambda p: p.metadata["candidate_index"]):
+            meta = candidate.metadata
+            mask = candidate.mask()
+            iou = mask_iou(mask, target) if target.any() else None
+            selected = meta["proposal_id"] == chosen.metadata["proposal_id"]
+            label = f"G{grid} C{meta['candidate_index']} | score={meta['predicted_iou_score']:.4f}"
+            label += f"\nIoU={iou:.4f}" if iou is not None else "\nIoU undefined: empty target"
+            if selected:
+                label += " | SELECTED"
+            panel = tile(overlay(rgb, mask, (0, 220, 80)), label, [meta])
+            if selected:
+                ImageDraw.Draw(panel).rectangle((1, 1, 338, 283), outline="#D79B00", width=5)
+            sheet.paste(panel, ((meta["candidate_index"]+1)*340, top))
+            rows.append({**meta, "measured_full_iou": iou, "globally_selected": selected,
+                         "point_inside_full_target": inside, "area_pixels": int(mask.sum())})
+    folder = output / "all_points"
+    folder.mkdir(exist_ok=True)
+    stem = f"source_{number:02d}_{condition}"
+    sheet.save(folder / f"{stem}.png")
+    (folder / f"{stem}.json").write_text(json.dumps({"source": source, "condition": condition,
+        "note": "Newly recomputed candidates, no candidate filtering", "candidates": rows}, indent=2)+"\n", encoding="utf-8")
+    print(f"All-dot sheet: {folder / (stem+'.png')}", flush=True)
+
+
 def config_for(run, output, arm):
     saved = json.loads((run / "config.json").read_text())
     config = saved["config"]
@@ -60,7 +112,7 @@ def config_for(run, output, arm):
     return load_config(path)
 
 
-def collect(run, rows, sources, output, model, processor, info, arm):
+def collect(run, rows, sources, output, model, processor, info, arm, all_points=False):
     config = config_for(run, output, arm)
     original = json.loads((run / "timing.json").read_text())["model"]
     for field in ("checkpoint", "builder_source", "predictor_source", "processor_source", "image_model_source"):
@@ -98,6 +150,9 @@ def collect(run, rows, sources, output, model, processor, info, arm):
             source, condition = row["source_key"], row["condition"]
             title = f"{condition} | IoU={iou:.3f}" if iou is not None else f"{condition} | empty target"
             rgb = sample["image"]
+            if all_points:
+                save_point_details(rgb, target, proposals, chosen, source, condition,
+                                   output, sources.index(source))
             panels[source, condition] = [
                 tile(Image.fromarray(rgb), "Input + independent grid prompts", [p.metadata for p in proposals]),
                 tile(overlay(rgb, chosen.mask(), (0, 220, 80)), "Chosen prediction (green)\n"+title, [chosen.metadata]),
@@ -117,6 +172,7 @@ def main():
     parser.add_argument("--fragmentation-run", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--count", type=int, default=3)
+    parser.add_argument("--all-points", action="store_true", help="Export every mask candidate for every prompt")
     args = parser.parse_args()
     import os
     require_slurm_step(os.environ)
@@ -134,7 +190,7 @@ def main():
     model, processor, info = load_scene_model(config.checkpoint, config.bpe_path, torch)
     panels, records = {}, []
     for arm, run, rows in (("fence", args.fence_run, fence), ("fragmentation", args.fragmentation_run, frag)):
-        current, evidence = collect(run, rows, sources, args.output, model, processor, info, arm)
+        current, evidence = collect(run, rows, sources, args.output, model, processor, info, arm, args.all_points)
         panels.update(current)
         records.extend(evidence)
     conditions = ("clean", "light", "medium", "heavy", "fragmentation")
