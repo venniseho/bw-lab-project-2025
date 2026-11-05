@@ -88,7 +88,7 @@ def main():
         "source_split": "COCO train2017 only; val2017 untouched",
         "instance_policy": "all noncrowd instances in the selected sources",
         "transform": "identity",
-        "positive_point": "foreground pixel nearest centroid",
+        "positive_point": "uniform random foreground pixel, fixed per instance by seed",
         "loss": "20*focal(alpha=.25,gamma=2)+dice+quality_mse; minimum-mask candidate",
         "splits": {
             name: {
