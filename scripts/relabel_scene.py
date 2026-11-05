@@ -1,4 +1,5 @@
 """Rebuild a saved SAM3 contact sheet on CPU, without model inference."""
+
 from __future__ import annotations
 
 import argparse
@@ -11,9 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 from PIL import Image
 
-from bwlab.models.proposals import Proposal
-from bwlab.visualization import all_proposal_overlay, contact_sheet
-from bwlab.infrastructure import load_rgb
+from core.models.proposals import Proposal
+from core.visualization import all_proposal_overlay, contact_sheet
+from core.infrastructure import load_rgb
 
 
 def relabel_scene(scene_dir: Path, output: Path) -> None:
@@ -38,8 +39,13 @@ def relabel_scene(scene_dir: Path, output: Path) -> None:
         if int(np.count_nonzero(mask)) != row["area_pixels"]:
             raise ValueError("archived mask area disagrees with metadata")
         retained.append(Proposal(np.packbits(mask != 0), mask.shape, row))
-    sheet = contact_sheet(rgb, all_proposal_overlay(rgb, retained), retained,
-                          prompts=report["proposals"], title=report.get("__key__") or report.get("condition"))
+    sheet = contact_sheet(
+        rgb,
+        all_proposal_overlay(rgb, retained),
+        retained,
+        prompts=report["proposals"],
+        title=report.get("__key__") or report.get("condition"),
+    )
     output.parent.mkdir(parents=True, exist_ok=True)
     # Exclusive creation protects an older sheet even if the path appears late.
     with output.open("xb") as target:

@@ -13,7 +13,11 @@ import numpy as np
 from PIL import Image
 
 from scripts.sam3_smoke_test import (
-    load_rgb, main, predict_point, require_slurm_step, save_prediction,
+    load_rgb,
+    main,
+    predict_point,
+    require_slurm_step,
+    save_prediction,
 )
 
 
@@ -55,12 +59,15 @@ class Sam3SmokeTests(unittest.TestCase):
         self.model.to.return_value = self.model
         self.model.eval.return_value = self.model
         self.model.config.to_dict.return_value = {"model_type": "sam3_tracker"}
-        self.batch = FakeBatch(original_sizes=FakeTensor([[3, 5]]),
-                               pixel_values=FakeTensor(np.zeros((1, 3, 4, 4))))
+        self.batch = FakeBatch(
+            original_sizes=FakeTensor([[3, 5]]), pixel_values=FakeTensor(np.zeros((1, 3, 4, 4)))
+        )
         self.processor = MagicMock()
         self.processor.return_value = self.batch
         self.processor.post_process_masks.return_value = [FakeTensor(self.masks)]
-        self.processor.image_processor.to_dict.return_value = {"size": {"height": 1008, "width": 1008}}
+        self.processor.image_processor.to_dict.return_value = {
+            "size": {"height": 1008, "width": 1008}
+        }
         self.processor.target_size = 1008
         self.torch = MagicMock()
         self.torch.__version__ = "mock-torch"
@@ -73,8 +80,13 @@ class Sam3SmokeTests(unittest.TestCase):
         self.transformers = MagicMock()
         self.transformers.__version__ = "mock-transformers"
         self.transformers.Sam3TrackerModel.from_pretrained.return_value = (
-            self.model, {"missing_keys": set(), "unexpected_keys": {"unused.pcs.weight"},
-                         "mismatched_keys": set(), "error_msgs": []}
+            self.model,
+            {
+                "missing_keys": set(),
+                "unexpected_keys": {"unused.pcs.weight"},
+                "mismatched_keys": set(),
+                "error_msgs": [],
+            },
         )
         self.transformers.Sam3TrackerProcessor.from_pretrained.return_value = self.processor
 
@@ -88,9 +100,19 @@ class Sam3SmokeTests(unittest.TestCase):
         (checkpoint / "model.safetensors").write_bytes(b"mock weights only")
         image = root / "input.png"
         self.image.save(image)
-        return ["--image", str(image), "--point", "3", "1",
-                "--checkpoint-dir", str(checkpoint), "--output-dir", str(root / "output"),
-                "--checkpoint-revision", "mock-revision"]
+        return [
+            "--image",
+            str(image),
+            "--point",
+            "3",
+            "1",
+            "--checkpoint-dir",
+            str(checkpoint),
+            "--output-dir",
+            str(root / "output"),
+            "--checkpoint-revision",
+            "mock-revision",
+        ]
 
     def test_visual_point_api_shapes_rgb_and_postprocessing(self):
         result = self.predict()
@@ -104,9 +126,16 @@ class Sam3SmokeTests(unittest.TestCase):
         self.assertTrue(self.model.call_args.kwargs["multimask_output"])
         self.assertTrue(self.model.call_args.kwargs["return_dict"])
         post = self.processor.post_process_masks.call_args.kwargs
-        self.assertEqual(post, {"mask_threshold": 0.0, "binarize": True,
-                                "max_hole_area": 0.0, "max_sprinkle_area": 0.0,
-                                "apply_non_overlapping_constraints": False})
+        self.assertEqual(
+            post,
+            {
+                "mask_threshold": 0.0,
+                "binarize": True,
+                "max_hole_area": 0.0,
+                "max_sprinkle_area": 0.0,
+                "apply_non_overlapping_constraints": False,
+            },
+        )
         np.testing.assert_array_equal(result.masks, self.masks[0])
         self.assertEqual(result.selected_index, 1)
         self.assertEqual(result.object_score_logits, [[[2.0]]])
@@ -125,8 +154,12 @@ class Sam3SmokeTests(unittest.TestCase):
         self.assertIsNone(result.object_score_logits)
 
     def test_bad_output_shapes_nonbinary_masks_and_scores_fail(self):
-        bad_masks = [self.masks[0], self.masks[:, :, :2],
-                     self.masks[:, :0], self.masks.astype(float)]
+        bad_masks = [
+            self.masks[0],
+            self.masks[:, :, :2],
+            self.masks[:, :0],
+            self.masks.astype(float),
+        ]
         for masks in bad_masks:
             with self.subTest(shape=masks.shape, dtype=masks.dtype):
                 self.processor.post_process_masks.return_value = [FakeTensor(masks)]
@@ -166,13 +199,18 @@ class Sam3SmokeTests(unittest.TestCase):
             with Image.open(output / "overlay.png") as overlay:
                 self.assertEqual(overlay.mode, "RGB")
                 self.assertEqual(overlay.getpixel((0, 0)), (210, 30, 10))
-                expected_color = tuple(np.rint(0.55 * np.array([210, 30, 10])
-                                              + 0.45 * np.array([0, 255, 255])).astype(int))
+                expected_color = tuple(
+                    np.rint(0.55 * np.array([210, 30, 10]) + 0.45 * np.array([0, 255, 255])).astype(
+                        int
+                    )
+                )
                 self.assertEqual(overlay.getpixel((3, 1)), expected_color)
             for index in range(3):
                 with Image.open(output / f"candidate_{index:02d}.png") as mask:
                     np.testing.assert_array_equal(np.asarray(mask), self.masks[0, index] * 255)
-            self.assertEqual([c["model_selected"] for c in report["candidates"]], [False, True, False])
+            self.assertEqual(
+                [c["model_selected"] for c in report["candidates"]], [False, True, False]
+            )
             saved = json.loads((output / "metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(saved, report)
             with self.assertRaises(FileExistsError):
@@ -190,7 +228,9 @@ class Sam3SmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             args = self.fixture(root)
-            with patch.dict("sys.modules", {"torch": self.torch, "transformers": self.transformers}):
+            with patch.dict(
+                "sys.modules", {"torch": self.torch, "transformers": self.transformers}
+            ):
                 main(args)
             model_kwargs = self.transformers.Sam3TrackerModel.from_pretrained.call_args.kwargs
             self.assertTrue(model_kwargs["local_files_only"])
@@ -201,10 +241,14 @@ class Sam3SmokeTests(unittest.TestCase):
             self.assertEqual(model_kwargs["attn_implementation"], "sdpa")
             self.model.to.assert_called_once_with("cuda")
             self.model.eval.assert_called_once_with()
-            processor_kwargs = self.transformers.Sam3TrackerProcessor.from_pretrained.call_args.kwargs
+            processor_kwargs = (
+                self.transformers.Sam3TrackerProcessor.from_pretrained.call_args.kwargs
+            )
             self.assertTrue(processor_kwargs["local_files_only"])
             report = json.loads((root / "output" / "metadata.json").read_text(encoding="utf-8"))
-            weights = next(f for f in report["checkpoint_files"] if f["file"] == "model.safetensors")
+            weights = next(
+                f for f in report["checkpoint_files"] if f["file"] == "model.safetensors"
+            )
             self.assertEqual(weights["sha256"], hashlib.sha256(b"mock weights only").hexdigest())
             self.assertEqual(report["checkpoint_revision"], "mock-revision")
             self.assertEqual(report["selected_candidate_index"], 1)
@@ -219,7 +263,9 @@ class Sam3SmokeTests(unittest.TestCase):
             root = Path(directory)
             args = self.fixture(root)
             self.torch.cuda.is_available.return_value = False
-            with patch.dict("sys.modules", {"torch": self.torch, "transformers": self.transformers}):
+            with patch.dict(
+                "sys.modules", {"torch": self.torch, "transformers": self.transformers}
+            ):
                 with self.assertRaisesRegex(RuntimeError, "CPU fallback is disabled"):
                     main(args)
             self.transformers.Sam3TrackerModel.from_pretrained.assert_not_called()
@@ -230,9 +276,12 @@ class Sam3SmokeTests(unittest.TestCase):
             root = Path(directory)
             args = self.fixture(root)
             self.transformers.Sam3TrackerModel.from_pretrained.return_value = (
-                self.model, {"missing_keys": ["vision_encoder.some_weight"]}
+                self.model,
+                {"missing_keys": ["vision_encoder.some_weight"]},
             )
-            with patch.dict("sys.modules", {"torch": self.torch, "transformers": self.transformers}):
+            with patch.dict(
+                "sys.modules", {"torch": self.torch, "transformers": self.transformers}
+            ):
                 with self.assertRaisesRegex(RuntimeError, "Incomplete/incompatible"):
                     main(args)
             self.model.to.assert_not_called()

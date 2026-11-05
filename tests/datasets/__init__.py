@@ -1,1 +1,1 @@
-"""Tests for bwlab.datasets."""
+"""Tests for datasets."""

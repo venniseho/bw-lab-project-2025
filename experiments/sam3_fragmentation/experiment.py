@@ -3,6 +3,7 @@
 Like the pinned mlvbench experiment, Config/run live outside the reusable library.
 GPU execution is explicit, requires an existing SLURM step and submits no jobs.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -14,16 +15,16 @@ import platform
 from pathlib import Path
 from typing import Literal
 
-from bwlab.datasets import DataModule, ManifestDataModule
-from bwlab.datasets.conditions import ConditionDataset
-from bwlab.infrastructure import file_fingerprint, require_slurm_step
-from bwlab.models import Sam3GridAdapter
-from bwlab.models.sam3 import load_scene_model
-from bwlab.runner import Runner
-from bwlab.stimuli import ContourFragmentation, FenceOcclusion, FragmentationConfig
-from bwlab.stimuli.export import prepare_stimuli
-from bwlab.tasks.scene_proposals import SceneProposalTask
-from bwlab.runtime import RuntimeConfig
+from datasets import DataModule, ManifestDataModule
+from datasets.conditions import ConditionDataset
+from core.infrastructure import file_fingerprint, require_slurm_step
+from core.models import Sam3GridAdapter
+from core.models.sam3 import load_scene_model
+from core.runner import Runner
+from core.stimuli import ContourFragmentation, FenceOcclusion, FragmentationConfig
+from core.stimuli.export import prepare_stimuli
+from core.tasks.scene_proposals import SceneProposalTask
+from core.runtime import RuntimeConfig
 
 
 @dataclass(frozen=True)
@@ -57,15 +58,23 @@ def build_conditions(config: Config) -> dict:
         raise ValueError("choose val or test explicitly")
     if config.condition == "fence":
         widths = config.fence_widths
-        if (len(widths) != 4 or widths[0] != 0
-                or not all(a < b for a, b in zip(widths, widths[1:]))
-                or widths[-1] > config.fence_spacing):
-            raise ValueError("four fence widths must start at zero, increase, and not exceed spacing")
+        if (
+            len(widths) != 4
+            or widths[0] != 0
+            or not all(a < b for a, b in zip(widths, widths[1:]))
+            or widths[-1] > config.fence_spacing
+        ):
+            raise ValueError(
+                "four fence widths must start at zero, increase, and not exceed spacing"
+            )
         if config.fence_phase is not None and config.seed is not None:
             raise ValueError("set seed to null when using an explicit fence phase")
-        conditions = {name: FenceOcclusion(width, config.fence_spacing, config.fence_angle,
-                                            config.seed, config.fence_phase)
-                      for name, width in zip(("clean", "light", "medium", "heavy"), widths)}
+        conditions = {
+            name: FenceOcclusion(
+                width, config.fence_spacing, config.fence_angle, config.seed, config.fence_phase
+            )
+            for name, width in zip(("clean", "light", "medium", "heavy"), widths)
+        }
     elif config.condition == "fragmentation":
         conditions = {"fragmentation": ContourFragmentation(config.fragmentation, config.seed)}
     else:
@@ -81,6 +90,7 @@ def build_data_module(config: Config) -> DataModule:
     dataset = ConditionDataset(original, conditions)
     if config.max_inputs is not None:
         from torch.utils.data import Subset
+
         if config.max_inputs < 1:
             raise ValueError("max_inputs must be positive")
         dataset = Subset(dataset, range(min(config.max_inputs, len(dataset))))
@@ -88,11 +98,15 @@ def build_data_module(config: Config) -> DataModule:
 
 
 def _save_config(config: Config, output_path: Path) -> None:
-    metadata = {"config": asdict(config), "input_manifest": file_fingerprint(config.manifest),
-                "experiment_source": file_fingerprint(Path(__file__)),
-                "architecture_reference": "c204a8185fb662b3b1edacfb7a98f7b36fbd9a70"}
+    metadata = {
+        "config": asdict(config),
+        "input_manifest": file_fingerprint(config.manifest),
+        "experiment_source": file_fingerprint(Path(__file__)),
+        "architecture_reference": "c204a8185fb662b3b1edacfb7a98f7b36fbd9a70",
+    }
     (output_path / "config.json").write_text(
-        json.dumps(metadata, indent=2, default=str, allow_nan=False) + "\n", encoding="utf-8")
+        json.dumps(metadata, indent=2, default=str, allow_nan=False) + "\n", encoding="utf-8"
+    )
 
 
 def prepare(config: Config, output_path: Path) -> dict:
@@ -121,59 +135,110 @@ def run(config: Config, output_path: Path) -> dict:
         raise ValueError("points_per_side must be positive")
     setup_start = time.perf_counter()
     data_module = build_data_module(config)
-    dataset_setup_seconds = time.perf_counter()-setup_start
+    dataset_setup_seconds = time.perf_counter() - setup_start
     import torch
+
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA required for native SAM3; use prepare for CPU export")
     torch.manual_seed(0)
     load_start = time.perf_counter()
     model, processor, model_info = load_scene_model(config.checkpoint, config.bpe_path, torch)
     torch.cuda.synchronize()
-    model_load_seconds = time.perf_counter()-load_start
+    model_load_seconds = time.perf_counter() - load_start
     if config.runtime is not None:
-        return _run_optimized(config, output_path, data_module, model, processor, model_info,
-                              run_start, dataset_setup_seconds, model_load_seconds)
-    task = SceneProposalTask(min_score=config.min_score, dedup_iou=config.dedup_iou,
-                             proposal_limit=config.proposal_limit,
-                             save_candidate_limit=config.save_candidate_limit,
-                             model_metadata=model_info)
-    runner = Runner(data_module, task, batch_size=config.batch_size,
-                    num_workers=config.num_workers, prefetch_factor=config.prefetch_factor)
+        return _run_optimized(
+            config,
+            output_path,
+            data_module,
+            model,
+            processor,
+            model_info,
+            run_start,
+            dataset_setup_seconds,
+            model_load_seconds,
+        )
+    task = SceneProposalTask(
+        min_score=config.min_score,
+        dedup_iou=config.dedup_iou,
+        proposal_limit=config.proposal_limit,
+        save_candidate_limit=config.save_candidate_limit,
+        model_metadata=model_info,
+    )
+    runner = Runner(
+        data_module,
+        task,
+        batch_size=config.batch_size,
+        num_workers=config.num_workers,
+        prefetch_factor=config.prefetch_factor,
+    )
     output_path.mkdir(parents=True, exist_ok=False)
     _save_config(config, output_path)
     pipeline_start = time.perf_counter()
     with torch.inference_mode():
-        report = runner.evaluate(Sam3GridAdapter(model, processor, config.points_per_side,
-                                                 synchronize=torch.cuda.synchronize),
-                                  output_path / "predictions", subset=config.subset)
-    timing = {"dataset_setup_seconds": dataset_setup_seconds,
-              "model_load_seconds": model_load_seconds,
-              "pipeline_seconds": time.perf_counter()-pipeline_start,
-              "run_total_seconds": time.perf_counter()-run_start,
-              "input_count": len(report["records"]), "cuda_synchronized": True,
-              "gpu": torch.cuda.get_device_name(0), "torch_version": torch.__version__,
-              "python_version": platform.python_version(),
-              "timing_scope": "wall seconds; run excludes process imports and scheduler queue; pipeline includes loading/transforms/inference/export"}
-    (output_path / "timing.json").write_text(json.dumps(timing, indent=2)+"\n", encoding="utf-8")
+        report = runner.evaluate(
+            Sam3GridAdapter(
+                model, processor, config.points_per_side, synchronize=torch.cuda.synchronize
+            ),
+            output_path / "predictions",
+            subset=config.subset,
+        )
+    timing = {
+        "dataset_setup_seconds": dataset_setup_seconds,
+        "model_load_seconds": model_load_seconds,
+        "pipeline_seconds": time.perf_counter() - pipeline_start,
+        "run_total_seconds": time.perf_counter() - run_start,
+        "input_count": len(report["records"]),
+        "cuda_synchronized": True,
+        "gpu": torch.cuda.get_device_name(0),
+        "torch_version": torch.__version__,
+        "python_version": platform.python_version(),
+        "timing_scope": "wall seconds; run excludes process imports and scheduler queue; pipeline includes loading/transforms/inference/export",
+    }
+    (output_path / "timing.json").write_text(json.dumps(timing, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(timing))
     return report
 
 
-def _run_optimized(config, output_path, data_module, model, processor, model_info,
-                   run_start, setup_seconds, load_seconds):
+def _run_optimized(
+    config,
+    output_path,
+    data_module,
+    model,
+    processor,
+    model_info,
+    run_start,
+    setup_seconds,
+    load_seconds,
+):
     import torch
-    from bwlab.models.batched_sam3 import BatchedSam3GridAdapter
-    from bwlab.runtime import configure_model, gpu_memory, GPUMonitor
-    from bwlab.tasks.summary import SummaryTask
+    from core.models.batched_sam3 import BatchedSam3GridAdapter
+    from core.runtime import configure_model, gpu_memory, GPUMonitor
+    from core.tasks.summary import SummaryTask
 
     runtime = config.runtime
     resources = configure_model(model, runtime)
-    adapter = (BatchedSam3GridAdapter(model, processor, config.points_per_side,
-                                    runtime.prompt_batch_size, runtime.pin_memory, torch.cuda.synchronize)
-               if runtime.batched else Sam3GridAdapter(model, processor, config.points_per_side,
-                                                      synchronize=torch.cuda.synchronize))
-    runner = Runner(data_module, SummaryTask(runtime.preview_batches), config.batch_size,
-                    config.num_workers, config.prefetch_factor, runtime.warmup_batches)
+    adapter = (
+        BatchedSam3GridAdapter(
+            model,
+            processor,
+            config.points_per_side,
+            runtime.prompt_batch_size,
+            runtime.pin_memory,
+            torch.cuda.synchronize,
+        )
+        if runtime.batched
+        else Sam3GridAdapter(
+            model, processor, config.points_per_side, synchronize=torch.cuda.synchronize
+        )
+    )
+    runner = Runner(
+        data_module,
+        SummaryTask(runtime.preview_batches),
+        config.batch_size,
+        config.num_workers,
+        config.prefetch_factor,
+        runtime.warmup_batches,
+    )
     output_path.mkdir(parents=True, exist_ok=False)
     _save_config(config, output_path)
     torch.cuda.reset_peak_memory_stats()
@@ -181,18 +246,27 @@ def _run_optimized(config, output_path, data_module, model, processor, model_inf
     with GPUMonitor(output_path / "gpu_utilization.csv", runtime.monitor_gpu) as monitor:
         report = runner.evaluate(adapter, output_path / "predictions", subset=config.subset)
         torch.cuda.synchronize()
-    seconds = time.perf_counter()-start
-    timing = {"dataset_setup_seconds": setup_seconds, "model_load_seconds": load_seconds,
-              "pipeline_seconds": seconds, "warmup_seconds": runner.warmup_seconds,
-              "evaluation_seconds": runner.evaluation_seconds,
-              "run_total_seconds": time.perf_counter()-run_start,
-              "input_count": len(report["records"]),
-              "inputs_per_second": len(report["records"])/runner.evaluation_seconds,
-              "gpu": torch.cuda.get_device_name(0), "gpu_monitor": monitor.status,
-              "torch_version": torch.__version__, "python_version": platform.python_version(),
-              "cuda_synchronized": True, **resources, **gpu_memory(), "model": model_info,
-              "timing_scope": "evaluation excludes warmup; previews included; per-input inference is batch-amortized"}
-    (output_path / "timing.json").write_text(json.dumps(timing, indent=2)+"\n", encoding="utf-8")
+    seconds = time.perf_counter() - start
+    timing = {
+        "dataset_setup_seconds": setup_seconds,
+        "model_load_seconds": load_seconds,
+        "pipeline_seconds": seconds,
+        "warmup_seconds": runner.warmup_seconds,
+        "evaluation_seconds": runner.evaluation_seconds,
+        "run_total_seconds": time.perf_counter() - run_start,
+        "input_count": len(report["records"]),
+        "inputs_per_second": len(report["records"]) / runner.evaluation_seconds,
+        "gpu": torch.cuda.get_device_name(0),
+        "gpu_monitor": monitor.status,
+        "torch_version": torch.__version__,
+        "python_version": platform.python_version(),
+        "cuda_synchronized": True,
+        **resources,
+        **gpu_memory(),
+        "model": model_info,
+        "timing_scope": "evaluation excludes warmup; previews included; per-input inference is batch-amortized",
+    }
+    (output_path / "timing.json").write_text(json.dumps(timing, indent=2) + "\n", encoding="utf-8")
     return report
 
 

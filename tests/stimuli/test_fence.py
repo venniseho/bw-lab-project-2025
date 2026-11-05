@@ -7,7 +7,7 @@ import unittest
 
 import numpy as np
 
-from bwlab.stimuli.fence import generate_fence
+from core.stimuli.fence import generate_fence
 
 
 class FenceTests(unittest.TestCase):
@@ -25,7 +25,9 @@ class FenceTests(unittest.TestCase):
         self.assertEqual(result.occlusion_mask.dtype, np.dtype(bool))
         np.testing.assert_array_equal(self.image, image_before)
         np.testing.assert_array_equal(gt, gt_before)
-        np.testing.assert_array_equal(result.corrupted_rgb[~result.occlusion_mask], self.image[~result.occlusion_mask])
+        np.testing.assert_array_equal(
+            result.corrupted_rgb[~result.occlusion_mask], self.image[~result.occlusion_mask]
+        )
         self.assertTrue(np.all(result.corrupted_rgb[result.occlusion_mask] == 0))
         self.assertFalse(np.shares_memory(result.corrupted_rgb, self.image))
 
@@ -56,8 +58,7 @@ class FenceTests(unittest.TestCase):
             for x in range(expected.shape[1]):
                 position = np.dot([x, y], normal)
                 expected[y, x] = any(
-                    -width / 2 <= position - (phase + k * spacing) < width / 2
-                    for k in range(-5, 6)
+                    -width / 2 <= position - (phase + k * spacing) < width / 2 for k in range(-5, 6)
                 )
         result = generate_fence(self.image, width, spacing, angle, seed)
         np.testing.assert_array_equal(result.occlusion_mask, expected)
@@ -69,7 +70,9 @@ class FenceTests(unittest.TestCase):
         for mask in (gt, gt.astype(np.uint8), gt.astype(np.uint8) * 255):
             result = generate_fence(self.image, 3, 10, gt_mask=mask)
             self.assertAlmostEqual(result.object_occluded_fraction, 8 / 20)
-        self.assertIsNone(generate_fence(self.image, 3, 10, gt_mask=np.zeros_like(gt)).object_occluded_fraction)
+        self.assertIsNone(
+            generate_fence(self.image, 3, 10, gt_mask=np.zeros_like(gt)).object_occluded_fraction
+        )
 
     def test_deterministic_generation_and_local_rng(self):
         for seed in (None, 0, 42):
@@ -84,10 +87,12 @@ class FenceTests(unittest.TestCase):
         self.assertEqual(before[0], after[0])
         np.testing.assert_array_equal(before[1], after[1])
         self.assertEqual(before[2:], after[2:])
-        self.assertFalse(np.array_equal(
-            generate_fence(self.image, 3, 10, 37, 1).occlusion_mask,
-            generate_fence(self.image, 3, 10, 37, 2).occlusion_mask,
-        ))
+        self.assertFalse(
+            np.array_equal(
+                generate_fence(self.image, 3, 10, 37, 1).occlusion_mask,
+                generate_fence(self.image, 3, 10, 37, 2).occlusion_mask,
+            )
+        )
 
     def test_increasing_width_keeps_centers_and_nested_masks(self):
         for angle in (0, 37, 90, 135):
@@ -113,8 +118,13 @@ class FenceTests(unittest.TestCase):
         np.testing.assert_array_equal(a.occlusion_mask, b.occlusion_mask)
 
     def test_invalid_geometry_and_mask_alignment(self):
-        for width, spacing, angle in ((-1, 10, 90), (11, 10, 90), (1, 0, 90),
-                                      (1, 10, np.nan), (1, np.inf, 90)):
+        for width, spacing, angle in (
+            (-1, 10, 90),
+            (11, 10, 90),
+            (1, 0, 90),
+            (1, 10, np.nan),
+            (1, np.inf, 90),
+        ):
             with self.assertRaises(ValueError):
                 generate_fence(self.image, width, spacing, angle)
         with self.assertRaises(ValueError):

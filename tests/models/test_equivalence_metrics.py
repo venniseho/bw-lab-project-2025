@@ -8,25 +8,35 @@ from unittest.mock import patch
 import numpy as np
 import torch
 
-from bwlab.models.proposals import Proposal
-from bwlab.runtime import RuntimeConfig
-from scripts._equivalence_metrics import comparison_rows, summarize
+from core.models.proposals import Proposal
+from core.runtime import RuntimeConfig
+from core.tasks.equivalence import comparison_rows, summarize
 from scripts.check_batch_equivalence import prediction_stages
 from scripts import check_batch_equivalence
 
 
 def proposal(mask, identifier=0, score=0.9):
-    return Proposal(np.packbits(mask), mask.shape,
-                    {"proposal_id": identifier, "grid_point_index": identifier//3,
-                     "candidate_index": identifier%3, "point_xy": [2.0, 3.0],
-                     "predicted_iou_score": score})
+    return Proposal(
+        np.packbits(mask),
+        mask.shape,
+        {
+            "proposal_id": identifier,
+            "grid_point_index": identifier // 3,
+            "candidate_index": identifier % 3,
+            "point_xy": [2.0, 3.0],
+            "predicted_iou_score": score,
+        },
+    )
 
 
 class EquivalenceMetricsTests(unittest.TestCase):
     def test_identical_empty_masks_have_pair_iou_one(self):
         empty = np.zeros((10, 10), bool)
-        rows = list(comparison_rows("a", [proposal(empty)], [proposal(empty)],
-                                    "test", 1e-5, np.ones_like(empty)))
+        rows = list(
+            comparison_rows(
+                "a", [proposal(empty)], [proposal(empty)], "test", 1e-5, np.ones_like(empty)
+            )
+        )
         self.assertEqual(rows[0]["mask_iou"], 1)
         self.assertFalse(rows[0]["strict_mismatch"])
         self.assertEqual(rows[0]["reference_target_iou"], 0)
@@ -62,19 +72,36 @@ class EquivalenceMetricsTests(unittest.TestCase):
 
     def test_diagnostic_matrix_isolates_image_and_prompt_batches(self):
         calls = []
+
         class Adapter:
             def __init__(self, model, processor, sides, prompts, pin, sync):
                 self.prompts = prompts
+
             def predict_batch(self, images):
                 calls.append((len(images), self.prompts))
                 return [(["candidate"], {}) for _ in images]
+
         reference = SimpleNamespace(predict=lambda image: (["candidate"], {}))
-        with patch("scripts.check_batch_equivalence.BatchedSam3GridAdapter", Adapter), \
-                patch("scripts.check_batch_equivalence.configure_model") as configure:
-            stages = list(prediction_stages(None, None, reference, [None, None], 3,
-                                           RuntimeConfig(prompt_batch_size=9), True))
-        self.assertEqual([name for name, _ in stages], ["reference_repeat", "tensor_single", "image_batch_only",
-                                                       "prompt_batch_only", "combined_without_benchmark", "configured_runtime"])
+        with (
+            patch("scripts.check_batch_equivalence.BatchedSam3GridAdapter", Adapter),
+            patch("scripts.check_batch_equivalence.configure_model") as configure,
+        ):
+            stages = list(
+                prediction_stages(
+                    None, None, reference, [None, None], 3, RuntimeConfig(prompt_batch_size=9), True
+                )
+            )
+        self.assertEqual(
+            [name for name, _ in stages],
+            [
+                "reference_repeat",
+                "tensor_single",
+                "image_batch_only",
+                "prompt_batch_only",
+                "combined_without_benchmark",
+                "configured_runtime",
+            ],
+        )
         self.assertEqual(calls, [(1, 1), (1, 1), (2, 1), (1, 9), (1, 9), (2, 9), (2, 9)])
         self.assertEqual(configure.call_count, 1)
 
@@ -82,30 +109,53 @@ class EquivalenceMetricsTests(unittest.TestCase):
         target = np.ones((3, 4), bool)
         altered = target.copy()
         altered[0, 0] = False
+
         class Adapter:
             def __init__(self, model, processor, sides, prompts, pin, sync):
                 self.mask = altered if prompts > 1 else target
+
             def predict_batch(self, images):
                 return [([proposal(self.mask)], {}) for _ in images]
+
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory)/"diagnostic.csv"
-            config = SimpleNamespace(subset="test", checkpoint=None, bpe_path=None,
-                                     runtime=RuntimeConfig(), points_per_side=3)
-            sample = {"__key__": "a", "image": np.zeros((3, 4, 3), np.uint8), "segmentation": target}
+            output = Path(directory) / "diagnostic.csv"
+            config = SimpleNamespace(
+                subset="test",
+                checkpoint=None,
+                bpe_path=None,
+                runtime=RuntimeConfig(),
+                points_per_side=3,
+            )
+            sample = {
+                "__key__": "a",
+                "image": np.zeros((3, 4, 3), np.uint8),
+                "segmentation": target,
+            }
             module = SimpleNamespace(test_dataset=lambda: [sample])
             model = SimpleNamespace(parameters=lambda: iter([torch.zeros(1)]))
             reference = SimpleNamespace(predict=lambda image: ([proposal(target)], {}))
-            with patch.dict("os.environ", {"SLURM_JOB_ID": "test", "SLURM_STEP_ID": "0"}), \
-                    patch("sys.argv", ["check", "--config", "unused", "--output", str(output), "--diagnose"]), \
-                    patch("torch.cuda.is_available", return_value=True), \
-                    patch("torch.cuda.get_device_name", return_value="mock GPU"), \
-                    patch.object(check_batch_equivalence, "load_config", return_value=config), \
-                    patch.object(check_batch_equivalence, "build_data_module", return_value=module), \
-                    patch.object(check_batch_equivalence, "load_scene_model", return_value=(model, None, {})), \
-                    patch.object(check_batch_equivalence, "Sam3GridAdapter", return_value=reference), \
-                    patch.object(check_batch_equivalence, "BatchedSam3GridAdapter", Adapter), \
-                    patch.object(check_batch_equivalence, "preprocessing_diagnostics", return_value=[{"exact": True, "max_absolute_difference": 0}]), \
-                    patch.object(check_batch_equivalence, "configure_model"):
+            with (
+                patch.dict("os.environ", {"SLURM_JOB_ID": "test", "SLURM_STEP_ID": "0"}),
+                patch(
+                    "sys.argv",
+                    ["check", "--config", "unused", "--output", str(output), "--diagnose"],
+                ),
+                patch("torch.cuda.is_available", return_value=True),
+                patch("torch.cuda.get_device_name", return_value="mock GPU"),
+                patch.object(check_batch_equivalence, "load_config", return_value=config),
+                patch.object(check_batch_equivalence, "build_data_module", return_value=module),
+                patch.object(
+                    check_batch_equivalence, "load_scene_model", return_value=(model, None, {})
+                ),
+                patch.object(check_batch_equivalence, "Sam3GridAdapter", return_value=reference),
+                patch.object(check_batch_equivalence, "BatchedSam3GridAdapter", Adapter),
+                patch.object(
+                    check_batch_equivalence,
+                    "preprocessing_diagnostics",
+                    return_value=[{"exact": True, "max_absolute_difference": 0}],
+                ),
+                patch.object(check_batch_equivalence, "configure_model"),
+            ):
                 check_batch_equivalence.main()
             evidence = json.loads(output.with_suffix(".summary.json").read_text())
             self.assertEqual(evidence["comparison_policy"], "report_only")

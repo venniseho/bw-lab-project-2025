@@ -1,1 +1,1 @@
-"""Tests for bwlab.models."""
+"""Tests for core.models."""

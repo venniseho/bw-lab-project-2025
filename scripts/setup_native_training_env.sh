@@ -31,8 +31,7 @@ fi
 }
 source "$destination/bin/activate"
 python -m pip install -c "$destination/working_stack_constraints.txt" \
-    hydra-core==1.3.2 omegaconf==2.3.0 submitit tensorboard zstandard scipy torchmetrics fvcore fairscale \
-    scikit-image scikit-learn wandb psutil pycocotools pyyaml
+    wandb psutil pycocotools
 python -m pip freeze > "$destination/installed_packages.txt"
 python - <<'PY'
 from importlib.metadata import version

@@ -8,7 +8,7 @@ visible-object support is `original & ~occlusion`. Inputs are never modified.
 ```python
 import numpy as np
 from evaluation.preparation import OcclusionCondition, prepare_probe
-from bwlab.stimuli.fence import generate_fence
+from core.stimuli.fence import generate_fence
 
 # image_rgb and original_mask are arrays at the same original resolution.
 conditions = []
@@ -63,6 +63,6 @@ pixels. Severity-specific point selection would confound the comparison.
 Run the focused tests and the existing fence regression tests:
 
 ```powershell
-python -B -m unittest discover -s tests -p test_probe_preparation.py -v
-python -B -m unittest discover -s tests -p test_fence.py -v
+python -B -m unittest discover -s tests -t . -p test_probe_preparation.py -v
+python -B -m unittest discover -s tests -t . -p test_fence.py -v
 ```

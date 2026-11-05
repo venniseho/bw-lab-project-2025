@@ -1,19 +1,24 @@
 """Exercise real autograd through a small stand-in for the interactive API."""
+
 from pathlib import Path
 import json
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import torch
 from torch import nn
 from PIL import Image
 
-from experiments.sam3_point_finetuning.data import dataset, foreground_point, loader
-from experiments.sam3_point_finetuning.experiment import checkpoint, check_step, gradient_probes
-from experiments.sam3_point_finetuning.loss import mask_loss
-from experiments.sam3_point_finetuning.model import point_forward, set_scope
+from datasets.point_training import dataset, loader
+from core.samples import foreground_point
+from core.trainer import checkpoint, PointTrainer
+from core.models.point_sam3 import check_step, gradient_probes
+from core.tasks.point_segmentation import mask_loss, forward_sample
+from core.models.point_sam3 import point_forward, set_scope, PointSegmenter
+from core.training_output import TrainingOutput
 
 
 class Backbone(nn.Module):
@@ -32,7 +37,7 @@ class Backbone(nn.Module):
 class Prompts(nn.Module):
     def __init__(self):
         super().__init__()
-        self.embedding = nn.Parameter(torch.ones(1, 4, 1, 1) * .1)
+        self.embedding = nn.Parameter(torch.ones(1, 4, 1, 1) * 0.1)
 
     def forward(self, points, boxes, masks):
         return self.embedding.flatten(2).transpose(1, 2), self.embedding
@@ -49,8 +54,16 @@ class Decoder(nn.Module):
         self.masks = nn.Conv2d(4, 3, 1)
         self.quality = nn.Linear(4, 3)
 
-    def forward(self, image_embeddings, image_pe, sparse_prompt_embeddings,
-                dense_prompt_embeddings, multimask_output, repeat_image, high_res_features):
+    def forward(
+        self,
+        image_embeddings,
+        image_pe,
+        sparse_prompt_embeddings,
+        dense_prompt_embeddings,
+        multimask_output,
+        repeat_image,
+        high_res_features,
+    ):
         features = image_embeddings + dense_prompt_embeddings + sum(high_res_features)
         return self.masks(features), self.quality(features.mean((-2, -1))), None, None
 
@@ -64,7 +77,12 @@ class Tracker(nn.Module):
 
     def _prepare_backbone_features(self, features):
         maps = features["backbone_fpn"]
-        return None, [x.flatten(2).permute(2, 0, 1) for x in maps], None, [x.shape[-2:] for x in maps]
+        return (
+            None,
+            [x.flatten(2).permute(2, 0, 1) for x in maps],
+            None,
+            [x.shape[-2:] for x in maps],
+        )
 
 
 def tiny_model():
@@ -74,27 +92,71 @@ def tiny_model():
     model.inst_interactive_predictor = nn.Module()
     model.inst_interactive_predictor.model = Tracker()
     model.inst_interactive_predictor._transforms = SimpleNamespace(
-        transform_coords=lambda coords, **kwargs: coords)
+        transform_coords=lambda coords, **kwargs: coords
+    )
     processor = SimpleNamespace(device="cpu", transform=lambda pixels: pixels.float() / 255)
     return model, processor
 
 
 class PointTrainingTests(unittest.TestCase):
+    def test_injected_trainer_runs_baseline_updates_preview_and_reloadable_checkpoint(self):
+        for scope in ("full", "frozen_encoder"):
+            with self.subTest(scope=scope), tempfile.TemporaryDirectory() as folder:
+                output = Path(folder)
+                (output / "previews").mkdir()
+                model, processor = tiny_model()
+                segmenter = PointSegmenter(model, processor, scope)
+                optimizer = torch.optim.AdamW(
+                    [p for p in model.parameters() if p.requires_grad], lr=0.01
+                )
+                trainer = PointTrainer(segmenter, optimizer, forward_sample, TrainingOutput(output))
+                train = {
+                    "__key__": "train",
+                    "image": np.full((8, 8, 3), 100, np.uint8),
+                    "segmentation": np.ones((8, 8), bool),
+                }
+                heldout = {**train, "__key__": "heldout"}
+                with patch("torch.cuda.max_memory_allocated", return_value=0):
+                    report = trainer.fit([train], [heldout], {"epochs": 2}, max_steps=1)
+                self.assertEqual(report["steps"], 1)
+                summaries = [
+                    json.loads(line) for line in (output / "summary.jsonl").read_text().splitlines()
+                ]
+                self.assertEqual([row["epoch"] for row in summaries], [0, 1])
+                self.assertTrue((output / "previews/epoch-1-0.png").is_file())
+                self.assertTrue((output / "complete.json").is_file())
+                state = torch.load(output / "checkpoint.pt", weights_only=True)
+                restored, _ = tiny_model()
+                restored.load_state_dict(state["model"], strict=True)
+                self.assertEqual("encoder" in report["gradient_and_step_audit"], scope == "full")
+
     def test_coco_instance_is_loaded_lazily_with_an_in_memory_transform(self):
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
             image = folder / "source.jpg"
             Image.new("RGB", (8, 8), "white").save(image)
-            annotations = {"images": [{"id": 1, "file_name": str(image), "width": 8, "height": 8}],
-                           "categories": [{"id": 1, "name": "object"}],
-                           "annotations": [{"id": 2, "image_id": 1, "category_id": 1,
-                                            "iscrowd": 0, "area": 16, "bbox": [1, 1, 4, 4],
-                                            "segmentation": [[1, 1, 5, 1, 5, 5, 1, 5]]}]}
+            annotations = {
+                "images": [{"id": 1, "file_name": str(image), "width": 8, "height": 8}],
+                "categories": [{"id": 1, "name": "object"}],
+                "annotations": [
+                    {
+                        "id": 2,
+                        "image_id": 1,
+                        "category_id": 1,
+                        "iscrowd": 0,
+                        "area": 16,
+                        "bbox": [1, 1, 4, 4],
+                        "segmentation": [[1, 1, 5, 1, 5, 5, 1, 5]],
+                    }
+                ],
+            }
             path = folder / "annotations.json"
             path.write_text(json.dumps(annotations))
+
             def transform(sample):
                 sample["image"][:] = 0
                 return sample
+
             samples = dataset(path, transform=transform)
             sample = next(iter(loader(samples, workers=0)))
             self.assertEqual(len(samples), 1)
@@ -116,10 +178,13 @@ class PointTrainingTests(unittest.TestCase):
                 model, processor = tiny_model()
                 set_scope(model, scope)
                 before = {name: p.detach().clone() for name, p in model.named_parameters()}
-                optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=.01)
+                optimizer = torch.optim.AdamW(
+                    [p for p in model.parameters() if p.requires_grad], lr=0.01
+                )
                 image = np.full((8, 8, 3), 100, dtype=np.uint8)
-                logits, scores = point_forward(model, processor, image, [2., 2.],
-                                               freeze_encoder=scope == "frozen_encoder")
+                logits, scores = point_forward(
+                    model, processor, image, [2.0, 2.0], freeze_encoder=scope == "frozen_encoder"
+                )
                 loss, _ = mask_loss(logits, scores, torch.ones(8, 8))
                 loss.backward()
                 probes = gradient_probes(model, scope)
@@ -135,26 +200,26 @@ class PointTrainingTests(unittest.TestCase):
                         self.assertIsNone(p.grad)
 
     def test_mask_loss_uses_one_candidate_but_trains_all_quality_scores(self):
-        logits = torch.tensor([[[4., -4.]], [[-4., 4.]], [[0., 0.]]], requires_grad=True)
-        scores = torch.tensor([.2, .4, .3], requires_grad=True)
-        loss, metrics = mask_loss(logits, scores, torch.tensor([[1., 0.]]))
+        logits = torch.tensor([[[4.0, -4.0]], [[-4.0, 4.0]], [[0.0, 0.0]]], requires_grad=True)
+        scores = torch.tensor([0.2, 0.4, 0.3], requires_grad=True)
+        loss, metrics = mask_loss(logits, scores, torch.tensor([[1.0, 0.0]]))
         loss.backward()
         self.assertEqual(metrics["training_candidate"], 0)
         self.assertGreater(int(torch.count_nonzero(logits.grad[0])), 0)
         self.assertEqual(int(torch.count_nonzero(logits.grad[1:])), 0)
         self.assertEqual(int(torch.count_nonzero(scores.grad)), 3)
         # Evaluation selects score=.4, whose mask is wrong; no oracle score here.
-        self.assertEqual(metrics["selected_iou"], 0.)
+        self.assertEqual(metrics["selected_iou"], 0.0)
 
     def test_small_model_can_reduce_loss_and_checkpoint_restores_weights(self):
         model, processor = tiny_model()
         set_scope(model, "frozen_encoder")
-        optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=.01)
+        optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=0.01)
         image = np.full((8, 8, 3), 100, dtype=np.uint8)
         losses = []
         for _ in range(12):
             optimizer.zero_grad()
-            logits, scores = point_forward(model, processor, image, [2., 2.], freeze_encoder=True)
+            logits, scores = point_forward(model, processor, image, [2.0, 2.0], freeze_encoder=True)
             loss, _ = mask_loss(logits, scores, torch.ones(8, 8))
             losses.append(float(loss.detach()))
             loss.backward()

@@ -99,7 +99,7 @@ export SAM3_MODEL_DIR=/absolute/path/to/sam3-snapshot
 export SAM3_REVISION=REPLACE_WITH_HF_COMMIT_HASH
 python -B scripts/sam3_smoke_test.py \
   --require-slurm \
-  --image outputs/fence_demo/source_rgb.png \
+  --image tests/fixtures/fence/source_rgb.png \
   --point 415 241 \
   --checkpoint-dir "$SAM3_MODEL_DIR" \
   --checkpoint-revision "$SAM3_REVISION" \
@@ -108,7 +108,7 @@ python -B scripts/sam3_smoke_test.py \
 ```
 
 The repository example is 640 x 360 pixels. `(415, 241)` was checked with the
-existing preparation module to lie inside `outputs/fence_demo/source_mask.png`
+existing preparation module to lie inside `tests/fixtures/fence/source_mask.png`
 and remain visible with widths 0/4/12/24, spacing 40, angle 90 and fence seed
 123. This command runs **one clean image**, not the sweep. For another image,
 supply its own prepared point in original pixel coordinates. The CLI does
@@ -158,9 +158,9 @@ it is not total device usage or load-time peak memory.
 ## CPU verification
 
 ```bash
-python -B -m unittest discover -s tests -p test_sam3_smoke.py -v
-python -B -m unittest discover -s tests -p test_probe_preparation.py -v
-python -B -m unittest discover -s tests -p test_fence.py -v
+python -B -m unittest discover -s tests -t . -p test_sam3_smoke.py -v
+python -B -m unittest discover -s tests -t . -p test_probe_preparation.py -v
+python -B -m unittest discover -s tests -t . -p test_fence.py -v
 python -B scripts/sam3_smoke_test.py --help
 ```
 

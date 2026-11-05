@@ -12,13 +12,24 @@ dependencies = ["numpy>=1.26", "pillow>=10.1", "opencv-python", "matplotlib", "t
 
 [project.optional-dependencies]
 coco = ["pycocotools"]
-legacy = ["scikit-image"]
 cluster = ["submitit"]
+training = ["pycocotools", "wandb", "psutil"]
+dev = ["ruff"]
 
 [tool.setuptools.packages.find]
-include = ["bwlab*", "experiments*", "legacy*"]
-exclude = ["legacy.main_2025*"]
+include = ["core*", "datasets*", "experiments*"]
 
 [tool.setuptools.package-data]
 "experiments.sam3_fragmentation" = ["configs/*.json", "README.md"]
-"legacy.contour_fragmentation" = ["setup_env.sh"]
+"experiments.sam3_point_finetuning" = ["README.md"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["tests/fixtures/contour_reference.py", ".references", ".worktrees"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*.py" = ["E402"]

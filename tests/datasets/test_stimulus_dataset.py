@@ -1,4 +1,5 @@
 """Native-coordinate dataset, model boundary, and preparation integration tests."""
+
 import json
 from pathlib import Path
 import tempfile
@@ -9,10 +10,10 @@ import numpy as np
 from PIL import Image
 from torchvision.transforms import Compose
 
-from bwlab.datasets import ImageMaskDataset, CocoInstanceDataset, build_loader
-from bwlab.runner import run_pipeline
+from datasets import ImageMaskDataset, CocoInstanceDataset, build_loader
+from core.runner import run_pipeline
 from scripts.prepare_stimuli import main
-from bwlab.stimuli.transforms import FenceOcclusion
+from core.stimuli.transforms import FenceOcclusion
 
 
 class DatasetTests(unittest.TestCase):
@@ -25,8 +26,13 @@ class DatasetTests(unittest.TestCase):
         self.mask[2:6, 3:9] = 255
         Image.fromarray(self.rgb).save(self.root / "rgb.png")
         Image.fromarray(self.mask).save(self.root / "mask.png")
-        self.records = [{"__key__": "a", "image_path": str(self.root / "rgb.png"),
-                         "mask_path": str(self.root / "mask.png")}]
+        self.records = [
+            {
+                "__key__": "a",
+                "image_path": str(self.root / "rgb.png"),
+                "mask_path": str(self.root / "mask.png"),
+            }
+        ]
 
     def test_dataset_compose_and_eval_loader(self):
         dataset = ImageMaskDataset(self.records, Compose([FenceOcclusion(2, 5)]))
@@ -40,19 +46,28 @@ class DatasetTests(unittest.TestCase):
     def test_variable_resolution_collation_and_worker(self):
         Image.fromarray(np.ones((3, 4, 3), np.uint8)).save(self.root / "small.png")
         Image.fromarray(np.ones((3, 4), np.uint8)).save(self.root / "small_mask.png")
-        records = self.records + [{"__key__": "b", "image_path": str(self.root / "small.png"),
-                                   "mask_path": str(self.root / "small_mask.png")}]
+        records = self.records + [
+            {
+                "__key__": "b",
+                "image_path": str(self.root / "small.png"),
+                "mask_path": str(self.root / "small_mask.png"),
+            }
+        ]
         dataset = ImageMaskDataset(records)
         for workers in (0, 1):
-            batch = next(iter(build_loader(dataset, split="val", batch_size=2, num_workers=workers)))
+            batch = next(
+                iter(build_loader(dataset, split="val", batch_size=2, num_workers=workers))
+            )
             self.assertEqual([s["image"].shape for s in batch], [(7, 11, 3), (3, 4, 3)])
 
     def test_coco_decisions_retained_without_shape_filters(self):
         coco = Mock()
         coco.loadImgs.return_value = [{"file_name": "rgb.png"}]
         coco.getAnnIds.return_value = [10, 11]
-        coco.loadAnns.return_value = [{"id": 10, "image_id": 1, "iscrowd": 0},
-                                     {"id": 11, "image_id": 1, "iscrowd": 1}]
+        coco.loadAnns.return_value = [
+            {"id": 10, "image_id": 1, "iscrowd": 0},
+            {"id": 11, "image_id": 1, "iscrowd": 1},
+        ]
         disconnected = np.zeros((7, 11), np.uint8)
         disconnected[0, 0] = disconnected[6, 10] = 1
         coco.annToMask.return_value = disconnected
@@ -82,10 +97,19 @@ class DatasetTests(unittest.TestCase):
         np.testing.assert_array_equal(sample["segmentation"], self.mask)
 
     def test_preparation_saves_separate_targets_and_refuses_overwrite(self):
-        (self.root / "records.json").write_text(json.dumps([
-            {"__key__": "a", "image_path": "rgb.png", "mask_path": "mask.png"}]))
-        argv = ["--manifest", str(self.root / "records.json"), "--output-dir", str(self.root / "prepared"),
-                "--transform", "fence", "--seed", "42"]
+        (self.root / "records.json").write_text(
+            json.dumps([{"__key__": "a", "image_path": "rgb.png", "mask_path": "mask.png"}])
+        )
+        argv = [
+            "--manifest",
+            str(self.root / "records.json"),
+            "--output-dir",
+            str(self.root / "prepared"),
+            "--transform",
+            "fence",
+            "--seed",
+            "42",
+        ]
         main(argv)
         report = json.loads((self.root / "prepared/manifest.json").read_text())
         self.assertEqual(report["status"], "complete")
@@ -93,8 +117,9 @@ class DatasetTests(unittest.TestCase):
         for record in report["records"]:
             with np.load(self.root / "prepared" / record["targets"]) as targets:
                 np.testing.assert_array_equal(targets["segmentation"], self.mask)
-                np.testing.assert_array_equal(targets["visible_segmentation"],
-                                              (self.mask > 0) & ~targets["occlusion_mask"])
+                np.testing.assert_array_equal(
+                    targets["visible_segmentation"], (self.mask > 0) & ~targets["occlusion_mask"]
+                )
         with self.assertRaises(FileExistsError):
             main(argv)
 

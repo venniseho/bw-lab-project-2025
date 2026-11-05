@@ -5,12 +5,12 @@ import unittest
 
 import numpy as np
 
-from bwlab.tasks.preparation import (
+from core.tasks.preparation import (
     OcclusionCondition,
     build_evaluation_targets,
     prepare_probe,
 )
-from bwlab.stimuli.fence import generate_fence
+from core.stimuli.fence import generate_fence
 
 
 class ProbePreparationTests(unittest.TestCase):
@@ -19,19 +19,26 @@ class ProbePreparationTests(unittest.TestCase):
         self.object[1:4, 1:8] = True
         self.conditions = []
         for name, columns in (
-            ("clean", []), ("light", [4]), ("medium", [3, 4]),
+            ("clean", []),
+            ("light", [4]),
+            ("medium", [3, 4]),
             ("heavy", [3, 4, 5]),
         ):
             mask = np.zeros_like(self.object)
             mask[:, columns] = True
-            self.conditions.append(OcclusionCondition(
-                name, mask, {"bar_width": len(columns), "bar_spacing": 9,
-                             "bar_angle": 90}, seed=42,
-            ))
+            self.conditions.append(
+                OcclusionCondition(
+                    name,
+                    mask,
+                    {"bar_width": len(columns), "bar_spacing": 9, "bar_angle": 90},
+                    seed=42,
+                )
+            )
 
     def prepare(self, **kwargs):
-        return prepare_probe(self.object, self.conditions,
-                             image_id="image-7", object_id=11, **kwargs)
+        return prepare_probe(
+            self.object, self.conditions, image_id="image-7", object_id=11, **kwargs
+        )
 
     def test_full_and_visible_targets_with_binary_encodings(self):
         original = np.array([[0, 1, 1], [1, 1, 0]], dtype=bool)
@@ -60,9 +67,7 @@ class ProbePreparationTests(unittest.TestCase):
         for condition, row in zip(self.conditions, probe.metadata):
             self.assertFalse(condition.occlusion_mask[y, x])
             self.assertTrue(probe.targets[condition.name].visible_object[y, x])
-            np.testing.assert_array_equal(
-                probe.targets[condition.name].full_object, self.object
-            )
+            np.testing.assert_array_equal(probe.targets[condition.name].full_object, self.object)
             self.assertEqual(row["prompt_xy"], [x, y])
             self.assertEqual(row["prompt_label"], 1)
 
@@ -80,9 +85,9 @@ class ProbePreparationTests(unittest.TestCase):
 
     def test_disconnected_object_with_centroid_outside_selects_foreground(self):
         original = np.array([[1, 0, 0, 0, 1]], dtype=bool)
-        probe = prepare_probe(original, [OcclusionCondition(
-            "clean", np.zeros_like(original), {}
-        )], image_id=1)
+        probe = prepare_probe(
+            original, [OcclusionCondition("clean", np.zeros_like(original), {})], image_id=1
+        )
         self.assertEqual(probe.prompt_xy, (0, 0))
 
     def test_metadata_records_actual_percent_and_provenance(self):
@@ -91,13 +96,12 @@ class ProbePreparationTests(unittest.TestCase):
             self.assertEqual(row["image_id"], "image-7")
             self.assertEqual(row["object_id"], 11)
             self.assertEqual(row["seed"], 42)
-            self.assertEqual(row["corruption_parameters"],
-                             self.conditions[i].corruption_parameters)
-            self.assertEqual(row["prompt_condition_names"],
-                             [c.name for c in self.conditions])
+            self.assertEqual(row["corruption_parameters"], self.conditions[i].corruption_parameters)
+            self.assertEqual(row["prompt_condition_names"], [c.name for c in self.conditions])
             self.assertTrue(row["valid_for_evaluation"])
-            self.assertAlmostEqual(row["object_occluded_percent"],
-                                   [0, 100 / 7, 200 / 7, 300 / 7][i])
+            self.assertAlmostEqual(
+                row["object_occluded_percent"], [0, 100 / 7, 200 / 7, 300 / 7][i]
+            )
         self.assertEqual(json.loads(json.dumps(probe.metadata)), probe.metadata)
         # Metadata ownership is independent of caller-owned parameter data.
         probe.metadata[0]["corruption_parameters"]["bar_width"] = 99
@@ -131,9 +135,10 @@ class ProbePreparationTests(unittest.TestCase):
             self.assertFalse(np.any(targets.visible_object))
 
     def test_fully_occluded_condition_invalidates_entire_paired_example(self):
-        conditions = [self.conditions[0], OcclusionCondition(
-            "covered", np.ones_like(self.object), {}, seed=None
-        )]
+        conditions = [
+            self.conditions[0],
+            OcclusionCondition("covered", np.ones_like(self.object), {}, seed=None),
+        ]
         probe = prepare_probe(self.object, conditions, image_id=1)
         self.assertFalse(probe.valid_for_evaluation)
         self.assertIsNone(probe.prompt_xy)
@@ -188,13 +193,19 @@ class ProbePreparationTests(unittest.TestCase):
         x, y = probe.prompt_xy
         for fence, row in zip(results, probe.metadata):
             self.assertFalse(fence.occlusion_mask[y, x])
-            self.assertAlmostEqual(row["object_occluded_percent"],
-                                   100 * fence.object_occluded_fraction)
+            self.assertAlmostEqual(
+                row["object_occluded_percent"], 100 * fence.object_occluded_fraction
+            )
 
     def test_invalid_masks_alignment_and_condition_sets(self):
-        for bad in (np.array([[0, 0.5]]), np.array([[np.nan]]),
-                    np.array([[-1]]), np.array([[1, 255]]),
-                    np.zeros((0, 2)), np.ones((2, 2, 1))):
+        for bad in (
+            np.array([[0, 0.5]]),
+            np.array([[np.nan]]),
+            np.array([[-1]]),
+            np.array([[1, 255]]),
+            np.zeros((0, 2)),
+            np.ones((2, 2, 1)),
+        ):
             with self.assertRaises(ValueError):
                 build_evaluation_targets(bad, bad)
         with self.assertRaises(ValueError):
@@ -204,9 +215,11 @@ class ProbePreparationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             prepare_probe(self.object, [self.conditions[0]] * 2, image_id=1)
         with self.assertRaises(ValueError):
-            prepare_probe(self.object, [OcclusionCondition(
-                "bad", np.zeros((2, 3), dtype=bool), {}
-            )], image_id=1)
+            prepare_probe(
+                self.object,
+                [OcclusionCondition("bad", np.zeros((2, 3), dtype=bool), {})],
+                image_id=1,
+            )
 
 
 if __name__ == "__main__":

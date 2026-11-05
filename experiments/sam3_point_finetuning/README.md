@@ -1,7 +1,6 @@
 # Point-prompt fine-tuning: start here
 
-This replaces the concept-head smoke experiment in `sam3_finetuning` for the
-perceptual-grouping project. It uses Meta's native **interactive modules**, with
+This is the active fine-tuning experiment for the perceptual-grouping project. It uses Meta's native **interactive modules**, with
 a small explicit PyTorch loop. It does not use Meta's concept-segmentation Trainer.
 
 ## What one training step does
@@ -46,7 +45,7 @@ forward computation; loss and stored parameters remain float32.
 The initial subset is eight training source images and four disjoint held-out
 source images, all from **train2017**. Every noncrowd instance in those images is
 one sample, so there may be more than eight training steps per epoch. **val2017
-is untouched.** Clean images only: `data.dataset(..., transform=...)` is the
+is untouched.** Clean images only: `datasets.point_training.dataset(..., transform=...)` is the
 in-memory hook for later fragmentation/fence experiments; the launcher currently
 rejects any non-identity transform configuration.
 
@@ -143,3 +142,10 @@ W&B defaults to **offline** and stores the run inside the output directory.
 Nothing is uploaded automatically. For online logging, run `wandb login` yourself
 and submit with `WANDB_MODE=online`; this also requires network access on the
 compute node. GPU/CPU system metrics are sampled by W&B where supported.
+
+## Implementation map
+
+`experiment.py` constructs the components. `datasets/point_training.py` loads
+instances; `core/models/point_sam3.py` owns the native differentiable point path;
+`core/tasks/point_segmentation.py` computes the loss; `core/trainer.py` runs the
+optimization/evaluation loop; `core/training_output.py` stores logs and previews.

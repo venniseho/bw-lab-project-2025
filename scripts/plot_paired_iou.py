@@ -1,4 +1,5 @@
 """Pair clean and transformed full-target IoU by source ID; no inference needed."""
+
 import argparse
 import csv
 import json
@@ -6,6 +7,7 @@ import math
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -57,36 +59,63 @@ def plot(fence_run, fragmentation_run, output):
     output.mkdir(parents=True, exist_ok=False)
     # Retain the exact pairings used for the figures, not just a visual summary.
     with (output / "paired_iou.csv").open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=["source_key", "condition", "clean_full_iou", "transformed_full_iou", "delta_iou"])
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=[
+                "source_key",
+                "condition",
+                "clean_full_iou",
+                "transformed_full_iou",
+                "delta_iou",
+            ],
+        )
         writer.writeheader()
         for condition, (sources, x, y) in pairs.items():
             for source, before, after in zip(sources, x, y):
-                writer.writerow({"source_key": source, "condition": condition,
-                                 "clean_full_iou": before, "transformed_full_iou": after,
-                                 "delta_iou": after-before})
+                writer.writerow(
+                    {
+                        "source_key": source,
+                        "condition": condition,
+                        "clean_full_iou": before,
+                        "transformed_full_iou": after,
+                        "delta_iou": after - before,
+                    }
+                )
     audit = {}
     fig, axis = plt.subplots(figsize=(7.5, 7.5), layout="constrained")
     panels, axes = plt.subplots(2, 2, figsize=(10.5, 10.8), sharex=True, sharey=True)
     handles = []
     for condition, color, panel in zip(CONDITIONS, COLORS, axes.flat):
         sources, x, y = pairs[condition]
-        audit[condition] = {"matched_sources": len(sources),
-                            "clean_only_sources": len(set(clean)-set(groups[condition])),
-                            "transformed_only_sources": len(set(groups[condition])-set(clean)),
-                            "mean_delta_iou": float(np.mean(y-x)),
-                            "below_diagonal": int(np.sum(y < x)),
-                            "equal": int(np.sum(y == x)),
-                            "both_exactly_zero": int(np.sum((x == 0) & (y == 0))),
-                            "clean_zero_transformed_positive": int(np.sum((x == 0) & (y > 0))),
-                            "clean_positive_transformed_zero": int(np.sum((x > 0) & (y == 0))),
-                            "above_diagonal": int(np.sum(y > x))}
+        audit[condition] = {
+            "matched_sources": len(sources),
+            "clean_only_sources": len(set(clean) - set(groups[condition])),
+            "transformed_only_sources": len(set(groups[condition]) - set(clean)),
+            "mean_delta_iou": float(np.mean(y - x)),
+            "below_diagonal": int(np.sum(y < x)),
+            "equal": int(np.sum(y == x)),
+            "both_exactly_zero": int(np.sum((x == 0) & (y == 0))),
+            "clean_zero_transformed_positive": int(np.sum((x == 0) & (y > 0))),
+            "clean_positive_transformed_zero": int(np.sum((x > 0) & (y == 0))),
+            "above_diagonal": int(np.sum(y > x)),
+        }
         for ax in (axis, panel):
             ax.scatter(x, y, color=color, s=9, alpha=0.60, linewidths=0, rasterized=True)
-        handles.append(Line2D([], [], marker="o", color=color, linestyle="",
-                              label=f"{condition.capitalize()} (n={len(sources):,})"))
+        handles.append(
+            Line2D(
+                [],
+                [],
+                marker="o",
+                color=color,
+                linestyle="",
+                label=f"{condition.capitalize()} (n={len(sources):,})",
+            )
+        )
         panel.set_title(f"{condition.capitalize()} (n={len(sources):,})")
-        print(f"{condition}: n={len(sources)}, mean change={np.mean(y-x):+.4f}; "
-              f"below/equal/above={np.sum(y<x)}/{np.sum(y==x)}/{np.sum(y>x)}")
+        print(
+            f"{condition}: n={len(sources)}, mean change={np.mean(y - x):+.4f}; "
+            f"below/equal/above={np.sum(y < x)}/{np.sum(y == x)}/{np.sum(y > x)}"
+        )
     for ax in (axis, *axes.flat):
         ax.plot([0, 1], [0, 1], linestyle="--", color="black", linewidth=1, zorder=0)
         ax.set_xlim(-0.025, 1.025)
@@ -101,9 +130,11 @@ def plot(fence_run, fragmentation_run, output):
     panels.subplots_adjust(left=0.10, right=0.98, bottom=0.14, top=0.92, hspace=0.20, wspace=0.13)
     panels.supxlabel("Clean-image full-target IoU", y=0.075)
     panels.supylabel("Transformed-image full-target IoU", x=0.012)
-    note = ("One point per matched source and condition; no jitter. Below diagonal = lower target IoU.\n"
-            "Highest-score grid candidate selected independently in each condition; selected object may change.")
-    fig.supxlabel("Clean-image full-target IoU\n\n"+note, fontsize=9)
+    note = (
+        "One point per matched source and condition; no jitter. Below diagonal = lower target IoU.\n"
+        "Highest-score grid candidate selected independently in each condition; selected object may change."
+    )
+    fig.supxlabel("Clean-image full-target IoU\n\n" + note, fontsize=9)
     axis.set_xlabel("")
     panels.text(0.5, 0.015, note, ha="center", va="bottom", fontsize=8)
     for figure, stem in ((fig, "paired_iou"), (panels, "paired_iou_by_condition")):
@@ -112,7 +143,7 @@ def plot(fence_run, fragmentation_run, output):
             figure.savefig(path, dpi=200, bbox_inches="tight")
             print(path.resolve())
         plt.close(figure)
-    (output / "pairing_audit.json").write_text(json.dumps(audit, indent=2)+"\n", encoding="utf-8")
+    (output / "pairing_audit.json").write_text(json.dumps(audit, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

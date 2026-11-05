@@ -1,9 +1,11 @@
 """Plot saved throughput sweeps without loading SAM3 or allocating a GPU."""
+
 import argparse
 import csv
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
@@ -28,12 +30,19 @@ def plot(root, output):
     for label, rows in sweeps.items():
         sizes = [int(row["batch_size"]) for row in rows]
         rates = [float(row["inputs_per_second"]) for row in rows]
-        latency = [1000 * float(row["evaluation_seconds"]) / int(row["input_count"]) for row in rows]
-        line, = axes[0].plot(sizes, rates, marker="o", label=label)
+        latency = [
+            1000 * float(row["evaluation_seconds"]) / int(row["input_count"]) for row in rows
+        ]
+        (line,) = axes[0].plot(sizes, rates, marker="o", label=label)
         axes[1].plot(sizes, latency, marker="o", label=label, color=line.get_color())
         best = max(range(len(rates)), key=rates.__getitem__)
-        axes[0].annotate(f"{rates[best]:.2f}", (sizes[best], rates[best]),
-                         xytext=(5, 8), textcoords="offset points", color=line.get_color())
+        axes[0].annotate(
+            f"{rates[best]:.2f}",
+            (sizes[best], rates[best]),
+            xytext=(5, 8),
+            textcoords="offset points",
+            color=line.get_color(),
+        )
     for axis in axes:
         axis.set_xscale("log", base=2)
         sizes = sorted({int(row["batch_size"]) for rows in sweeps.values() for row in rows})
@@ -44,8 +53,11 @@ def plot(root, output):
     axes[0].set_ylabel("Inputs per second (higher is faster)")
     axes[1].set_ylabel("Evaluation ms per input (lower is faster)")
     fig.suptitle("SAM3 evaluation throughput by image batch size")
-    fig.supxlabel("Includes loading, transforms, inference and metrics; excludes model loading and warm-up.\n"
-                  "Amortized time per input, not isolated prediction latency. Single sweeps; no error bars.", fontsize=9)
+    fig.supxlabel(
+        "Includes loading, transforms, inference and metrics; excludes model loading and warm-up.\n"
+        "Amortized time per input, not isolated prediction latency. Single sweeps; no error bars.",
+        fontsize=9,
+    )
     for extension in ("png", "svg"):
         path = output / f"batch_throughput.{extension}"
         fig.savefig(path, dpi=180)

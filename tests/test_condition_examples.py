@@ -6,7 +6,7 @@ import unittest
 import numpy as np
 from PIL import Image
 
-from bwlab.models.proposals import Proposal, point_grid
+from core.models.proposals import Proposal, point_grid
 from scripts.export_condition_examples import save_point_details
 
 
@@ -18,10 +18,19 @@ class AllPointSheetTests(unittest.TestCase):
                 mask = np.zeros((12, 20), bool)
                 if candidate:
                     mask[2:5, 3:7] = True
-                proposals.append(Proposal(np.packbits(mask), mask.shape, {
-                    "proposal_id": len(proposals), "grid_point_index": grid,
-                    "candidate_index": candidate, "point_xy": point.tolist(),
-                    "predicted_iou_score": 0.9 if len(proposals) == 14 else 0.5}))
+                proposals.append(
+                    Proposal(
+                        np.packbits(mask),
+                        mask.shape,
+                        {
+                            "proposal_id": len(proposals),
+                            "grid_point_index": grid,
+                            "candidate_index": candidate,
+                            "point_xy": point.tolist(),
+                            "predicted_iou_score": 0.9 if len(proposals) == 14 else 0.5,
+                        },
+                    )
+                )
         return proposals
 
     def test_all_27_candidates_including_empty_masks_are_exported(self):
@@ -47,5 +56,13 @@ class AllPointSheetTests(unittest.TestCase):
         proposals = self.proposals()
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "all three candidates"):
-                save_point_details(np.zeros((12, 20, 3), np.uint8), np.ones((12, 20), bool),
-                                   proposals[:-1], proposals[0], "a", "clean", Path(directory), 0)
+                save_point_details(
+                    np.zeros((12, 20, 3), np.uint8),
+                    np.ones((12, 20), bool),
+                    proposals[:-1],
+                    proposals[0],
+                    "a",
+                    "clean",
+                    Path(directory),
+                    0,
+                )

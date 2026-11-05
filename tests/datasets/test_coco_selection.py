@@ -8,17 +8,25 @@ import unittest
 
 import numpy as np
 
-from bwlab.datasets.selection import (
-    load_coco_image_instances, prepare_selected_probe, summarize_selection,
+from datasets.selection import (
+    load_coco_image_instances,
+    prepare_selected_probe,
+    summarize_selection,
     validate_instance,
 )
-from bwlab.tasks.preparation import OcclusionCondition
-from bwlab.stimuli.fence import generate_fence
+from core.tasks.preparation import OcclusionCondition
+from core.stimuli.fence import generate_fence
 
 
 def annotation(identifier=1, crowd=0):
-    return {"id": identifier, "image_id": 10, "iscrowd": crowd,
-            "category_id": 3, "area": 99999, "segmentation": [[0, 0, 1, 0, 1, 1]]}
+    return {
+        "id": identifier,
+        "image_id": 10,
+        "iscrowd": crowd,
+        "category_id": 3,
+        "area": 99999,
+        "segmentation": [[0, 0, 1, 0, 1, 1]],
+    }
 
 
 class CocoSelectionTests(unittest.TestCase):
@@ -39,9 +47,9 @@ class CocoSelectionTests(unittest.TestCase):
         self.assertFalse(mask[int(ys.mean()), int(xs.mean())])
         record = validate_instance(annotation(), mask, mask.shape)
         self.assertTrue(record.accepted)
-        probe = prepare_selected_probe(record, [OcclusionCondition(
-            "clean", np.zeros_like(mask), {}
-        )])
+        probe = prepare_selected_probe(
+            record, [OcclusionCondition("clean", np.zeros_like(mask), {})]
+        )
         x, y = probe.prompt_xy
         self.assertTrue(mask[y, x])
 
@@ -56,9 +64,9 @@ class CocoSelectionTests(unittest.TestCase):
             record = validate_instance(annotation(), mask, mask.shape)
             self.assertTrue(record.accepted)
             np.testing.assert_array_equal(record.mask, mask)
-            probe = prepare_selected_probe(record, [OcclusionCondition(
-                "clean", np.zeros_like(mask), {}
-            )])
+            probe = prepare_selected_probe(
+                record, [OcclusionCondition("clean", np.zeros_like(mask), {})]
+            )
             np.testing.assert_array_equal(probe.targets["clean"].full_object, mask != 0)
             self.assertEqual(record.metadata["object_area_pixels"], np.count_nonzero(mask))
 
@@ -91,7 +99,8 @@ class CocoSelectionTests(unittest.TestCase):
 
     def test_malformed_and_nonbinary_masks_are_explicitly_excluded(self):
         for mask, reason in (
-            (None, "malformed_mask"), ([[0, 1]], "malformed_mask"),
+            (None, "malformed_mask"),
+            ([[0, 1]], "malformed_mask"),
             (np.ones((3, 5, 1)), "malformed_mask"),
             (np.full((3, 5), 0.5), "nonbinary_mask"),
             (np.full((3, 5), np.nan), "nonbinary_mask"),
@@ -131,8 +140,10 @@ class CocoSelectionTests(unittest.TestCase):
     def test_unknown_crowd_status_and_bad_ids_are_not_silently_assumed_valid(self):
         mask = np.ones((2, 3), dtype=bool)
         for field, value, reason in (
-            ("iscrowd", None, "invalid_iscrowd"), ("iscrowd", 2, "invalid_iscrowd"),
-            ("id", None, "invalid_annotation_id"), ("image_id", None, "invalid_image_id"),
+            ("iscrowd", None, "invalid_iscrowd"),
+            ("iscrowd", 2, "invalid_iscrowd"),
+            ("id", None, "invalid_annotation_id"),
+            ("image_id", None, "invalid_image_id"),
         ):
             ann = annotation()
             ann[field] = value
@@ -146,20 +157,31 @@ class CocoSelectionTests(unittest.TestCase):
             validate_instance(annotation(), mask, (0, 3))
 
     def test_statistics_include_empty_source_images_and_all_exclusion_reasons(self):
-        masks = [np.ones((3, 5), dtype=bool), np.zeros((3, 5), dtype=bool),
-                 np.ones((3, 5), dtype=bool), None]
-        records = [validate_instance(annotation(i + 1, crowd=int(i == 2)), mask, (3, 5),
-                                     decode_error="ValueError: bad RLE" if i == 3 else None)
-                   for i, mask in enumerate(masks)]
+        masks = [
+            np.ones((3, 5), dtype=bool),
+            np.zeros((3, 5), dtype=bool),
+            np.ones((3, 5), dtype=bool),
+            None,
+        ]
+        records = [
+            validate_instance(
+                annotation(i + 1, crowd=int(i == 2)),
+                mask,
+                (3, 5),
+                decode_error="ValueError: bad RLE" if i == 3 else None,
+            )
+            for i, mask in enumerate(masks)
+        ]
         stats = summarize_selection(records, source_image_ids=[10, 11, 12])
         self.assertEqual(stats["source_image_count"], 3)
         self.assertEqual(stats["object_instance_count"], 4)
         self.assertEqual(stats["accepted_count"], 1)
         self.assertEqual(stats["excluded_count"], 3)
         self.assertEqual(stats["crowd_annotation_count"], 1)
-        self.assertEqual(stats["exclusion_reasons"], {
-            "crowd_annotation": 1, "empty_mask": 1, "mask_decode_error": 1
-        })
+        self.assertEqual(
+            stats["exclusion_reasons"],
+            {"crowd_annotation": 1, "empty_mask": 1, "mask_decode_error": 1},
+        )
         self.assertEqual(sum(stats["exclusion_reasons"].values()), stats["excluded_count"])
         self.assertEqual([r["object_area_pixels"] for r in stats["instances"]], [15, 0, 15, None])
         self.assertEqual(json.loads(json.dumps(stats, allow_nan=False)), stats)
@@ -188,15 +210,16 @@ class CocoSelectionTests(unittest.TestCase):
         records = load_coco_image_instances(coco, 10, (3, 5))
         self.assertEqual(coco.kwargs, {"imgIds": [10]})
         self.assertEqual([r.metadata["annotation_id"] for r in records], [1, 2, 3])
-        self.assertEqual([r.metadata["exclusion_reason"] for r in records],
-                         [None, "crowd_annotation", "mask_decode_error"])
+        self.assertEqual(
+            [r.metadata["exclusion_reason"] for r in records],
+            [None, "crowd_annotation", "mask_decode_error"],
+        )
         self.assertIn("malformed segmentation", records[2].metadata["decode_error"])
 
     def test_annotation_image_mismatch_retains_source_frame_for_statistics(self):
         ann = annotation()
         ann["image_id"] = 99
-        record = validate_instance(ann, np.ones((3, 5), dtype=bool), (3, 5),
-                                   expected_image_id=10)
+        record = validate_instance(ann, np.ones((3, 5), dtype=bool), (3, 5), expected_image_id=10)
         self.assertEqual(record.metadata["exclusion_reason"], "annotation_image_id_mismatch")
         stats = summarize_selection([record], source_image_ids=[10])
         self.assertEqual(stats["excluded_count"], 1)
@@ -234,7 +257,9 @@ class CocoSelectionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             prepare_selected_probe(excluded, conditions)
 
-    @unittest.skipUnless(importlib.util.find_spec("pycocotools"), "optional pycocotools not installed")
+    @unittest.skipUnless(
+        importlib.util.find_spec("pycocotools"), "optional pycocotools not installed"
+    )
     def test_real_coco_polygon_parts_and_rle_hole_crowd_and_misalignment(self):
         from pycocotools.coco import COCO
         from pycocotools import mask as mask_utils
@@ -243,15 +268,17 @@ class CocoSelectionTests(unittest.TestCase):
         hole[1:6, 1:8] = 1
         hole[2:5, 2:7] = 0
         anns = [annotation(i) for i in (1, 2, 3, 4)]
-        anns[0]["segmentation"] = [[1, 1, 3, 1, 3, 3, 1, 3],
-                                    [6, 5, 8, 5, 8, 6, 6, 6]]
+        anns[0]["segmentation"] = [[1, 1, 3, 1, 3, 3, 1, 3], [6, 5, 8, 5, 8, 6, 6, 6]]
         anns[1]["segmentation"] = mask_utils.encode(np.asfortranarray(hole))
         anns[2]["iscrowd"] = 1
         anns[2]["segmentation"] = mask_utils.encode(np.asfortranarray(hole))
         anns[3]["segmentation"] = mask_utils.encode(np.ones((2, 3), dtype=np.uint8, order="F"))
         coco = COCO()
-        coco.dataset = {"images": [{"id": 10, "height": 7, "width": 9}],
-                        "annotations": anns, "categories": [{"id": 3}]}
+        coco.dataset = {
+            "images": [{"id": 10, "height": 7, "width": 9}],
+            "annotations": anns,
+            "categories": [{"id": 3}],
+        }
         with redirect_stdout(io.StringIO()):
             coco.createIndex()
         records = load_coco_image_instances(coco, 10, (7, 9))

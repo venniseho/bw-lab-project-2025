@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image
 from pycocotools.coco import COCO
 
-from bwlab.datasets.manifest import ManifestDataModule
+from datasets.manifest import ManifestDataModule
 from scripts.prepare_coco_validation import download, main, select_records
 
 
@@ -28,14 +28,14 @@ class CocoManifestTests(TestCase):
     def test_download_is_atomic_and_reuses_existing_files(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "val2017" / "image.jpg"
-            with patch("scripts.prepare_coco_validation.urlopen", return_value=io.BytesIO(b"image")) as fetch:
+            with patch("datasets.download.urlopen", return_value=io.BytesIO(b"image")) as fetch:
                 download("https://example.invalid/image.jpg", path)
                 download("https://example.invalid/image.jpg", path)
                 self.assertEqual(fetch.call_count, 1)
             self.assertEqual(path.read_bytes(), b"image")
             self.assertFalse(path.with_suffix(".jpg.part").exists())
             failed = path.with_name("failed.jpg")
-            with patch("scripts.prepare_coco_validation.urlopen", side_effect=OSError("network")):
+            with patch("datasets.download.urlopen", side_effect=OSError("network")):
                 with self.assertRaises(OSError):
                     download("https://example.invalid/failed.jpg", failed)
             self.assertFalse(failed.exists())
@@ -44,12 +44,24 @@ class CocoManifestTests(TestCase):
     def fixture(self, root):
         (root / "annotations").mkdir()
         (root / "val2017").mkdir()
-        data = {"images": [{"id": 1, "file_name": "000000000001.jpg", "height": 8, "width": 10},
-                           {"id": 2, "file_name": "000000000002.jpg", "height": 8, "width": 10}],
-                "categories": [{"id": 1, "name": "object"}],
-                "annotations": [{"id": 10, "image_id": 1, "category_id": 1, "iscrowd": 0,
-                                 "segmentation": [[1, 1, 4, 1, 4, 4, 1, 4]],
-                                 "area": 9, "bbox": [1, 1, 3, 3]}]}
+        data = {
+            "images": [
+                {"id": 1, "file_name": "000000000001.jpg", "height": 8, "width": 10},
+                {"id": 2, "file_name": "000000000002.jpg", "height": 8, "width": 10},
+            ],
+            "categories": [{"id": 1, "name": "object"}],
+            "annotations": [
+                {
+                    "id": 10,
+                    "image_id": 1,
+                    "category_id": 1,
+                    "iscrowd": 0,
+                    "segmentation": [[1, 1, 4, 1, 4, 4, 1, 4]],
+                    "area": 9,
+                    "bbox": [1, 1, 3, 3],
+                }
+            ],
+        }
         path = root / "annotations/instances_val2017.json"
         path.write_text(json.dumps(data), encoding="utf-8")
         Image.fromarray(np.full((8, 10, 3), 100, np.uint8)).save(root / "val2017/000000000001.jpg")
@@ -92,9 +104,12 @@ class CocoManifestTests(TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             data, path = self.fixture(root)
-            data["annotations"].extend([
-                {"id": 2, "image_id": 1, "iscrowd": 1, "area": 1},
-                {"id": 3, "image_id": 1, "iscrowd": 0, "area": 1}])
+            data["annotations"].extend(
+                [
+                    {"id": 2, "image_id": 1, "iscrowd": 1, "area": 1},
+                    {"id": 3, "image_id": 1, "iscrowd": 0, "area": 1},
+                ]
+            )
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             first = select_records(data, 2, 42, root, path, digest)
             self.assertEqual(first, select_records(data, 2, 42, root, path, digest))

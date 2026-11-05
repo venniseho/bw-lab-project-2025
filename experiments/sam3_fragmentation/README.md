@@ -2,7 +2,7 @@
 
 This directory owns configuration and component wiring, following the role of
 `experiments/figure_ground_shape_cues/` in the pinned mlvbench repository.
-Reusable implementations live in `bwlab/`.
+Reusable implementations live in `core/`.
 
 Create `records.json` in the repository root with explicit image/mask records:
 

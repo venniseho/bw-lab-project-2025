@@ -1,10 +1,12 @@
 """Scatter measured target IoU by condition from saved SAM3 evaluation CSVs."""
+
 import argparse
 import csv
 import math
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -44,12 +46,21 @@ def plot(fence_run, fragmentation_run, output, metric="full_iou"):
     for index, (condition, color) in enumerate(zip(CONDITIONS, COLORS)):
         values = groups[condition]
         x = index + rng.uniform(-0.23, 0.23, len(values))
-        axis.scatter(x, values, color=color, s=7, alpha=0.14,
-                     linewidths=0, rasterized=True, zorder=2)
+        axis.scatter(
+            x, values, color=color, s=7, alpha=0.14, linewidths=0, rasterized=True, zorder=2
+        )
         average = float(np.mean(values))
         axis.scatter(index, average, color="black", marker="D", s=42, zorder=4)
-        handles.append(Line2D([], [], marker="o", linestyle="", color=color,
-                              label=f"{condition.capitalize()} (n={len(values):,})"))
+        handles.append(
+            Line2D(
+                [],
+                [],
+                marker="o",
+                linestyle="",
+                color=color,
+                label=f"{condition.capitalize()} (n={len(values):,})",
+            )
+        )
         print(f"{condition}: n={len(values)}, mean {metric}={average:.4f}")
     handles.append(Line2D([], [], marker="D", linestyle="", color="black", label="Condition mean"))
     axis.legend(handles=handles, loc="upper right", fontsize=9)
@@ -60,8 +71,11 @@ def plot(fence_run, fragmentation_run, output, metric="full_iou"):
     axis.set_title("SAM3 segmentation accuracy across stimulus conditions")
     axis.grid(axis="y", alpha=0.2)
     axis.set_axisbelow(True)
-    fig.supxlabel("Each dot: one source–condition result. Horizontal jitter only separates overlapping dots.\n"
-                  "Highest model-score grid candidate; one noncrowd target per source. Complete finite results only.", fontsize=9)
+    fig.supxlabel(
+        "Each dot: one source–condition result. Horizontal jitter only separates overlapping dots.\n"
+        "Highest model-score grid candidate; one noncrowd target per source. Complete finite results only.",
+        fontsize=9,
+    )
     for extension in ("png", "svg"):
         path = output / f"{metric}_scatter.{extension}"
         fig.savefig(path, dpi=200)

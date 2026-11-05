@@ -1,1 +1,1 @@
-"""Tests for bwlab.tasks."""
+"""Tests for core.tasks."""

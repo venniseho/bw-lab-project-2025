@@ -39,7 +39,7 @@ tests without changing several components at once.
 
 # Approach
 
-Organize reusable code under `bwlab/{datasets,stimuli,models,tasks}`, with a
+Organize reusable code under `core/{datasets,stimuli,models,tasks}`, with a
 shared Runner and separate configuration and `run()` functions under
 `experiments/`, following the pinned mlvbench structure.
 

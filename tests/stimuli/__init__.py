@@ -1,1 +1,1 @@
-"""Tests for bwlab.stimuli."""
+"""Tests for core.stimuli."""

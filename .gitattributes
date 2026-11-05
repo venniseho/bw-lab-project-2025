@@ -1,4 +1,11 @@
-# Preserve the exact historical source bytes, including mixed line endings.
-legacy/contour_fragmentation/*.py -text
-legacy/contour_fragmentation/setup_env.sh -text
-legacy/main_2025/** -text
+# Portable source and Slurm scripts.
+* text=auto
+*.py text eol=lf
+*.sh text eol=lf
+*.sbatch text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+
+# The scientific regression reference must retain its exact historical bytes.
+tests/fixtures/contour_reference.py -text

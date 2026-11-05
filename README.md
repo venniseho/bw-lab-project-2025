@@ -1,42 +1,64 @@
-# BWLab perceptual grouping pipeline
+# Perceptual grouping with SAM3
 
-Two separately usable transforms preserve historical contour fragmentation and
-synthetic fence occlusion. Full and visible targets remain separate.
+Test how segmentation changes under contour fragmentation and fence occlusion,
+then fine-tune the point-prompted model using controlled comparisons.
 
-Reusable code lives under `bwlab/{datasets,stimuli,models,tasks}`. Experiments
-own their configuration and wiring under `experiments/`, following the pinned
-mlvbench structure. `Runner` connects DataLoader → model → evaluator; a concrete
-proposal-export task reuses the working native SAM3 workflow.
+## Project map
 
-- [Architecture map and reference correspondence](docs/architecture.md)
-- [Supervisor update draft and next steps](docs/supervisor_update.md)
-- [Timed ten-image Vulcan pilot](docs/timed_pipeline_pilot.md)
-- [PyTorch batching, throughput profiling and Submitit launcher](docs/pytorch_throughput.md)
-- [Configured fence/contour experiment](experiments/sam3_fragmentation/README.md)
-- [Pipeline usage and sample contract](docs/stimulus_pipeline.md)
-- [Branch inventory, preserved algorithms, and merge review](docs/refactor_inventory.md)
-- [Presentation outline](docs/presentation_outline.md)
-- [Lab wiki pitch draft](docs/lab_wiki_pitch_draft.md)
-- [Existing native SAM3 workflow](docs/sam3_scene_masks.md)
+```text
+core/           Models, transforms, evaluation, rendering and the training loop
+datasets/       Dataset loaders, source splits and cached COCO downloads
+experiments/    Configuration and the code that assembles an experiment
+scripts/        Commands, figures and Vulcan job submission
+tests/          Regression tests and small offline fixtures
+docs/           Usage guides and research notes
+data/           Local datasets; ignored by Git
+outputs/        Runs, figures and local archives; ignored by Git
+```
 
-## Where things live
+There are two active experiments:
 
-| Folder | Purpose |
-| --- | --- |
-| `bwlab/` | Reusable datasets, transforms, model adapters and tasks |
-| `experiments/` | Experiment entry points and configurations |
-| `scripts/` | Command-line tools and Vulcan job scripts |
-| `tests/` | Tests grouped like the library |
-| `docs/` | Usage, architecture and research notes |
-| `legacy/contour_fragmentation/` | Frozen contour algorithm used by the adapter |
-| `legacy/main_2025/` | Historical scripts, source assets and old outputs |
-| `data/` | Local datasets (ignored by Git) |
-| `outputs/` | Current runs and downloaded Vulcan results (ignored by Git) |
+* [Evaluate clean, fenced and fragmented images](experiments/sam3_fragmentation/README.md).
+* [Fine-tune the point-prompted model](experiments/sam3_point_finetuning/README.md),
+  comparing the full point path against a frozen image encoder.
 
-The old import-only folders have been removed; use `bwlab` imports.
-Historical files were relocated without changing their contents. See
-[the archive guide](legacy/main_2025/README.md) before running old scripts.
-The ten-image pilot automatically finds the archived image/mask pairs.
+Each experiment's `experiment.py` puts together datasets, transforms, a model and
+a runner/trainer. Reusable implementations live in `core/` and `datasets/`.
+This follows the library/experiment separation in
+[Matthias's mlvbench](https://github.com/mtangemann/mlvbench).
 
-Run the CPU checks with `python -B -m unittest discover -s tests -v`.
-Use the [Vulcan pilot guide](docs/timed_pipeline_pilot.md) for GPU runs.
+## Start here
+
+* [Architecture and design rules](docs/architecture.md)
+* [Vulcan environment and native SAM3 setup](docs/vulcan_scene_setup.md)
+* [Throughput benchmarks and profiling](docs/pytorch_throughput.md)
+* [Dataset/transform sample contract](docs/stimulus_pipeline.md)
+* [COCO instance-selection policy](docs/coco_selection.md)
+* [Paired target-point preparation](docs/prompt_preparation.md)
+
+After switching to this layout, refresh the editable install in your existing
+environment. This does not replace PyTorch or download model weights:
+
+```bash
+python -m pip install -e . --no-deps
+python -B -m unittest discover -s tests -t . -v
+```
+
+The explicit test root (`-t .`) keeps `tests/datasets` separate from the actual
+`datasets` package. GPU commands require a Slurm GPU job step; CPU tests do not
+establish SAM3 GPU training success or improved segmentation accuracy.
+
+## Results and historical material
+
+Downloaded contact sheets and plots live in `outputs/figures/`. New jobs continue
+to save to their configured output directories, including scratch on Vulcan.
+
+The local cleanup archive is `outputs/archive/pre-cleanup-cb240b7.zip`, with a
+SHA-256 manifest beside it. It preserves the historical 2025 tree and superseded
+concept-training implementation. It is ignored by Git and is not uploaded.
+Those tracked sources also remain recoverable from commit `cb240b7`.
+
+The offline ten-image pilot uses `tests/fixtures/pilot/`. Larger runs should use
+the COCO preparation command in the throughput guide. The original contour
+implementation is retained only as `tests/fixtures/contour_reference.py` for
+scientific regression checks; production transforms do not import it.

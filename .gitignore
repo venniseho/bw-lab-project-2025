@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 .worktrees/
 .references/
+.ruff_cache/
 outputs/
 data_input/
 checkpoints/

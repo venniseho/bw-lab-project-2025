@@ -3,6 +3,7 @@
     "**/__pycache__": true,
     ".worktrees": true,
     ".venv": true,
-    ".references": true
+    ".references": true,
+    ".ruff_cache": true
   }
 }

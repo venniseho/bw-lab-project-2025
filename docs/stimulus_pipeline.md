@@ -10,9 +10,9 @@ pycocotools; an existing COCO API is injected rather than downloaded.
 
 ```python
 from torchvision.transforms import Compose
-from bwlab.datasets import ImageMaskDataset, CocoInstanceDataset, build_loader
-from bwlab.stimuli import FenceOcclusion, ContourFragmentation
-from bwlab.stimuli import FragmentationConfig
+from datasets import ImageMaskDataset, CocoInstanceDataset, build_loader
+from core.stimuli import FenceOcclusion, ContourFragmentation
+from core.stimuli import FragmentationConfig
 
 fence = FenceOcclusion(bar_width=12, bar_spacing=40, bar_angle=90, seed=42)
 contour = ContourFragmentation(FragmentationConfig(noise_count=300), seed=42)
@@ -108,10 +108,10 @@ The primary configured entrypoint is now
 which wires the DataModule, transforms, Sam3GridAdapter, Runner and concrete
 SceneProposalTask together. See the [experiment guide](../experiments/sam3_fragmentation/README.md)
 for JSON configuration and `prepare`/`run` commands. New code imports the reusable
-`bwlab` package; previous paths remain compatibility imports.
+`core` and `datasets` packages; the old package names have been removed.
 
-For in-memory integration, `bwlab.models.sam3.Sam3GridAdapter.predict()` reuses
-`collect_proposals` on an already loaded model/processor. `bwlab.runner.Runner`
+For in-memory integration, `core.models.sam3.Sam3GridAdapter.predict()` reuses
+`collect_proposals` on an already loaded model/processor. `core.runner.Runner`
 reads explicit evaluation loaders and passes only RGB to the model; its task's
 evaluator receives sample dictionaries and archives targets separately through
 `update()` / `finalize()`. `SceneProposalTask` saves the existing proposal archive
@@ -119,10 +119,10 @@ and reports artifact locations/counts, without introducing quantitative scores.
 The old `run_pipeline` callable interface remains for compatibility.
 
 ```python
-from bwlab.datasets import ManifestDataModule
-from bwlab.models import Sam3GridAdapter
-from bwlab.runner import Runner
-from bwlab.tasks.scene_proposals import SceneProposalTask
+from datasets import ManifestDataModule
+from core.models import Sam3GridAdapter
+from core.runner import Runner
+from core.tasks.scene_proposals import SceneProposalTask
 
 module = ManifestDataModule({"test": manifest_path}, transform=fence)
 runner = Runner(module, SceneProposalTask())
@@ -153,13 +153,13 @@ Run focused tests (historical root experiments require external data/models and
 are not a self-contained discovery suite):
 
 ```sh
-python -B -m unittest discover -s tests -p test_fence.py -v
-python -B -m unittest discover -s tests -p test_coco_selection.py -v
-python -B -m unittest discover -s tests -p test_probe_preparation.py -v
-python -B -m unittest discover -s tests -p test_sam3_smoke.py -v
-python -B -m unittest discover -s tests -p test_scene_proposals.py -v
-python -B -m unittest discover -s tests -p 'test_stimulus_*.py' -v
-python -B -m unittest discover -s tests -p test_visualization.py -v
+python -B -m unittest discover -s tests -t . -p test_fence.py -v
+python -B -m unittest discover -s tests -t . -p test_coco_selection.py -v
+python -B -m unittest discover -s tests -t . -p test_probe_preparation.py -v
+python -B -m unittest discover -s tests -t . -p test_sam3_smoke.py -v
+python -B -m unittest discover -s tests -t . -p test_scene_proposals.py -v
+python -B -m unittest discover -s tests -t . -p 'test_stimulus_*.py' -v
+python -B -m unittest discover -s tests -t . -p test_visualization.py -v
 ```
 
 Prompt overlays now label every queried point as G0, G1, etc. on both header

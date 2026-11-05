@@ -1,88 +1,97 @@
-# Structure following the pinned mlvbench revision
+# Code organization
 
-Reference: https://github.com/mtangemann/mlvbench/tree/c204a8185fb662b3b1edacfb7a98f7b36fbd9a70
-
-The reusable library and experiment wiring are separate, as in Matthias's repo.
-The initial PR exposed similar interfaces within the old directories; the
-revised implementation makes that organization the actual source of the code.
+The layout follows [mlvbench](https://github.com/mtangemann/mlvbench): reusable
+components, small experiment assembly functions, and separate cluster launchers.
+Dataset loading is a top-level package at the project's author's request.
 
 ```text
-bwlab/                          reusable library, analogous to mlvbench/
-  samples.py                    shared dictionary and binary-mask contracts
-  datasets/
-    _base.py                    DataModule: explicit train/val/test loaders
-    _loading.py                 native-resolution list collation
-    image_mask.py               ImageMaskDataset
-    coco.py                     CocoInstanceDataset
-    selection.py                reused inclusive COCO validation policy
-    manifest.py                 manifests, source-image split checks
-    conditions.py               independently transform each original sample
-  stimuli/
-    functional.py               draw_fence / fragment_contours array API
-    fence.py                    existing fixed-center fence algorithm
-    fragmentation.py            adapter calling the frozen archive helpers
-    transforms.py               Compose-compatible dictionary transforms
-    export.py                   CPU input/target export
+datasets/
+  coco.py, coco_manifest.py       Lazy COCO image/instance loading
+  image_mask.py, manifest.py      Explicit image/mask manifests
+  selection.py                   Instance validity and exclusion reasons
+  splits.py                      Disjoint source-image training splits
+  download.py                    Atomic, cached official COCO downloads
+  conditions.py                  Apply each condition to the original sample
+  point_training.py              Tiny point-training dataset and loader
+
+core/
   models/
-    _base.py                    image-only Model contract
-    sam3.py                     native loader, API checks and Sam3GridAdapter
-    proposals.py                grid queries and explicit selection policy
+    sam3.py                      Native model loading and grid adapter
+    batched_sam3.py               Batched evaluation adapter
+    point_sam3.py                 Differentiable point path and trainable scope
+    proposals.py                 Candidate generation and selection
+  stimuli/
+    transforms.py                Callable fence/fragmentation transforms
+    fence.py                     Fence geometry and coverage
+    fragmentation.py             Fragmentation configuration and RNG ownership
+    _contours.py                 Contour/noise geometry; no file I/O
+    export.py                    Optional stimulus export
   tasks/
-    _base.py                    Task.get_evaluator; update/finalize contracts
-    scene_proposals.py          concrete proposal-export task/evaluator
-    _scene_export.py            existing masks/metadata archive format
-    preparation.py              separate common-visible prompt protocol
-  runner.py                     shared DataLoader -> model -> evaluator loop
-  visualization.py              contact sheets and overlays
-  infrastructure.py             shared I/O, fingerprints and SLURM guard
+    scene_proposals.py            Evaluation and proposal export
+    point_segmentation.py         Point target construction and mask loss
+    preparation.py               Common-visible prompts across conditions
+  runner.py                      Inference loop with injected model and evaluator
+  trainer.py                     Training loop with injected segmenter/task/output
+  training_output.py             Training logs and before/after output
+  visualization.py               Rendering only
+  samples.py                     Shared image/mask contracts
+  infrastructure.py              File fingerprints and Slurm guard
+  runtime.py, monitoring.py       Evaluation performance configuration/reporting
+
 experiments/
-  sam3_fragmentation/
-    experiment.py               Config, build_data_module, prepare, run
-    configs/                    fence and contour JSON examples
-    README.md                   experiment commands and output layout
-tests/{datasets,models,stimuli,tasks}/  tests mirror library responsibilities
-tests/helpers.py                shared native SAM3 test doubles
-legacy/contour_fragmentation/   exact archive source, unchanged
+  sam3_fragmentation/             Evaluation configuration, run and cluster launch
+  sam3_point_finetuning/          Fine-tuning assembly and instructions
 ```
 
-| Pinned mlvbench responsibility | BWLab implementation |
-| --- | --- |
-| `mlvbench/datasets/_base.py::DataModule` | `bwlab/datasets/_base.py::DataModule` owns named splits and loading; only train shuffles. |
-| `mlvbench/datasets/msra10k.py::MSRA10KDataset` | Image/mask and COCO Datasets implement `__len__` and `__getitem__`; each returns a sample dictionary and owns its optional transform. |
-| `mlvbench/stimuli/transforms.py` | `bwlab/stimuli/transforms.py` provides small callable transforms over `__key__`, `image`, `segmentation` and retained metadata. |
-| `mlvbench/models/_base.py` and model implementations | `bwlab/models/_base.py` and `sam3.py` separate the image-only interface and native implementation from experiments. |
-| `mlvbench/tasks/_base.py` | `bwlab/tasks/_base.py` separates the task from its incremental evaluator. |
-| `mlvbench/tasks/binary_segmentation.py` | `SceneProposalTask` supplies a concrete evaluator for the existing proposal archive protocol; new quantitative metrics remain deferred. |
-| `mlvbench/trainer.py` | `bwlab/runner.py` owns the reusable inference loop. No trainer is added before training is needed. |
-| `experiments/figure_ground_shape_cues/experiment.py` | `experiments/sam3_fragmentation/experiment.py` holds Config and wires components in `run()`. |
-| Experiment `launch.py` and config files | JSON config examples plus explicit `prepare`/`run` commands. Existing SLURM allocation scripts are retained; no new automatic job launcher is introduced. |
+## What the design rules mean here
 
-`bwlab` never imports experiments, scripts or compatibility packages. The model
-receives only RGB arrays; the evaluator receives the sample and can archive
-targets. Rendering and filesystem export do not live in the native model adapter.
-Tests enforce the dependency direction and exercise the complete composition
-with the existing native SAM3 fake, not a replacement segmentation algorithm.
+* **Single responsibility:** loaders decode samples; transforms modify samples;
+  model adapters call SAM3; tasks calculate loss/metrics; outputs persist results.
+  `experiment.py` assembles these pieces rather than implementing them.
+* **Open for extension:** new transforms are callables over the same sample
+  contract. Runners receive their models/tasks; no condition-specific switches
+  belong in the training loop.
+* **Substitution:** dataset implementations share PyTorch's indexing contract;
+  model/task implementations must preserve their documented input/output contract.
+  Tests exercise the actual composition with small model doubles.
+* **Small interfaces:** evaluation uses `Model`, `Task` and `Evaluator` protocols.
+  Training uses a separate `TrainableSegmenter` protocol; an inference adapter
+  does not need dummy optimization methods.
+* **Dependency injection:** `Runner` and `PointTrainer` receive their dependencies.
+  They do not download COCO, construct SAM3, log into W&B or submit cluster jobs.
 
-`ManifestDataModule` rejects a source-image path shared across supplied splits.
-`DataModule` can also wrap explicit COCO instance datasets: callers must split
-image IDs before expanding instances, and can supply just an evaluation split.
-Condition expansion preserves `source_key` and appends the condition name to
-`__key__`, giving each transformed sample a stable unique identifier. Every
-severity starts from the same original sample, preserving the full target.
+Classes are used for components that own state or implement a callable contract.
+Pure geometry and loss calculations remain functions. SOLID is a design guide,
+not a reason to turn every helper into a class or add inheritance hierarchies.
 
-The old import-only compatibility folders have been removed. All callers use
-`bwlab` directly. Historical root scripts and their assets now live together
-under `legacy/main_2025/`, with their contents preserved. The frozen contour
-baseline remains under `legacy/contour_fragmentation/`.
+## Scientific behavior preserved
 
-The adaptation keeps native NumPy RGB arrays, the existing Meta API and Python
-3.12 compatibility. It does not copy the reference's feature/probe trainer,
-caching layer, multi-model dependencies, Python 3.14 requirement, or full
-scheduler launcher. Those components serve reference experiments not yet part
-of the authorized BWLab refactor. The pinned README, library layout, model
-interface, trainer, experiment and launcher were inspected in addition to the
-six originally requested files.
+This cleanup does not change fence formulas, fragmentation geometry, source
+selection policies, point coordinates, candidate selection, mask losses or
+training scopes. Contour RNG streams are now passed explicitly rather than
+installed into dynamically loaded legacy modules; their order is preserved.
+Unseeded contour output still uses entropy-based random generators.
 
-The first validated refactor was merged via PR #3. Follow-up rendering and
-function cleanup is on a new branch based on that updated main. The follow-up also removes compatibility
-folders and relocates historical files without rewriting them.
+`full` fine-tuning updates the image encoder and interactive prompt/mask modules.
+`frozen_encoder` updates the interactive prompt/mask modules only. Unused text,
+concept and video modules are frozen in both runs. This remains a clean-image
+training sanity experiment, with the existing transform hook reserved for later.
+
+The superseded concept-segmentation training experiment was archived. Native
+point-prompt training does not import its configuration, trainer or loss.
+
+## Local cleanup and compatibility
+
+The former `bwlab` package is now `core`; its dataset modules are now `datasets`.
+Update external Python imports accordingly and refresh the editable install with
+`python -m pip install -e . --no-deps`. Repository/Vulcan paths and active command
+filenames remain unchanged. There is no compatibility package hiding the rename.
+
+Historical assets and generated outputs were archived locally, verified by hash,
+and removed from the active tracked tree. Ten original source/mask pairs remain
+as offline fixtures. Plot/contact-sheet downloads were relocated to
+`outputs/figures`. No model checkpoints or real datasets were removed.
+
+Run checks with `python -B -m unittest discover -s tests -t . -v`. The frozen
+contour reference in tests is deliberately excluded from production style rules:
+its exact bytes are the independent historical regression baseline.

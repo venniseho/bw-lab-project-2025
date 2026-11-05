@@ -20,7 +20,7 @@ No SAM3, torch, GPU or weights are needed for input listing or mocked tests:
 
 ```bash
 python scripts/sam3_scene_masks.py --image-dir data/examples/natural_occlusions --limit-images 7 --list-images
-python -m unittest discover -s tests -p test_scene_proposals.py -v
+python -m unittest discover -s tests -t . -p test_scene_proposals.py -v
 ```
 
 ## Vulcan prerequisites and live resource checks

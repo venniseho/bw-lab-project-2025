@@ -17,12 +17,16 @@ class PairedIoUTests(unittest.TestCase):
     def test_duplicate_source_condition_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "results.csv"
-            path.write_text("source_key,condition,status,full_iou\na,clean,complete,0\na,clean,complete,0.5\n")
+            path.write_text(
+                "source_key,condition,status,full_iou\na,clean,complete,0\na,clean,complete,0.5\n"
+            )
             with self.assertRaisesRegex(ValueError, "Duplicate"):
                 read_scores(path)
 
     def test_nonfinite_and_incomplete_scores_are_not_paired(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "results.csv"
-            path.write_text("source_key,condition,status,full_iou\na,clean,complete,0\nb,clean,empty_target,\nc,clean,complete,nan\n")
+            path.write_text(
+                "source_key,condition,status,full_iou\na,clean,complete,0\nb,clean,empty_target,\nc,clean,complete,nan\n"
+            )
             self.assertEqual(read_scores(path), {"clean": {"a": 0}})
