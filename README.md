@@ -32,6 +32,7 @@ This follows the library/experiment separation in
 * [Architecture and design rules](docs/architecture.md)
 * [Vulcan environment and native SAM3 setup](docs/vulcan_scene_setup.md)
 * [Throughput benchmarks and profiling](docs/pytorch_throughput.md)
+* [Online W&B setup and dashboard](docs/wandb.md)
 * [Dataset/transform sample contract](docs/stimulus_pipeline.md)
 * [COCO instance-selection policy](docs/coco_selection.md)
 * [Paired target-point preparation](docs/prompt_preparation.md)

@@ -67,6 +67,7 @@ module load python/3.12.4
 module load opencv/4.12.0
 bash scripts/setup_native_training_env.sh
 source /scratch/vho/sam3-whole-scene/train-env/bin/activate
+# Follow docs/wandb.md to log in and set your WANDB_ENTITY before submission.
 
 POINT_ROOT=$(mktemp -d /scratch/vho/sam3-whole-scene/point-training.XXXXXX)
 echo "Keep this path: $POINT_ROOT"
@@ -138,10 +139,12 @@ The first real job checks native-forward agreement before attempting updates.
 That is an implementation check, not a requirement that batched predictions match
 pixel-for-pixel, and not evidence of improved segmentation accuracy.
 
-W&B defaults to **offline** and stores the run inside the output directory.
-Nothing is uploaded automatically. For online logging, run `wandb login` yourself
-and submit with `WANDB_MODE=online`; this also requires network access on the
-compute node. GPU/CPU system metrics are sampled by W&B where supported.
+W&B defaults to **online**. Authenticate with `wandb login` before submitting a
+job and set `WANDB_ENTITY` to your personal/team workspace. The log prints the
+dashboard link. Training/held-out curves use explicit step/epoch axes; selected
+before/after images are uploaded. Model checkpoints stay on scratch. See the
+[online setup guide](../../docs/wandb.md) for commands, including uploading the
+completed offline smoke run. Set `WANDB_MODE=offline` for a disconnected job.
 
 ## Implementation map
 

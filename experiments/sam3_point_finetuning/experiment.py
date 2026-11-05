@@ -69,18 +69,29 @@ def build_output(path, metadata, wandb_mode):
         import wandb
 
         tracking = wandb.init(
-            project="bwlab-point-finetuning",
+            project=os.environ.get("WANDB_PROJECT", "bwlab-point-finetuning"),
+            entity=os.environ.get("WANDB_ENTITY") or None,
+            group=os.environ.get("WANDB_RUN_GROUP", path.parent.name),
+            job_type=metadata["scope"],
             name=path.name,
             dir=str(path),
             config=metadata,
             mode=wandb_mode,
         )
-    output = TrainingOutput(path, tracking)
+        tracking.define_metric("train/step")
+        tracking.define_metric("train/*", step_metric="train/step")
+        tracking.define_metric("heldout/epoch")
+        tracking.define_metric("heldout/*", step_metric="heldout/epoch")
+        tracking.define_metric("examples/epoch")
+        tracking.define_metric("examples/*", step_metric="examples/epoch")
+        if wandb_mode == "online":
+            print(f"W&B dashboard: {tracking.url}", flush=True)
+    output = TrainingOutput(path, tracking, image_factory=wandb.Image if tracking else None)
     output.save_json("metadata", metadata)
     return output
 
 
-def run(config, scope, output, wandb_mode="offline", max_steps=None):
+def run(config, scope, output, wandb_mode="online", max_steps=None):
     """Construct dependencies once; the trainer owns the training loop."""
     validate_config(config, max_steps)
     path = Path(output)
@@ -116,12 +127,15 @@ def run(config, scope, output, wandb_mode="offline", max_steps=None):
         flush=True,
     )
     trainer = PointTrainer(segmenter, optimizer, forward_sample, output)
+    exit_code = 1
     try:
-        return trainer.fit(
+        result = trainer.fit(
             loader(train, config["workers"]), loader(heldout, config["workers"]), config, max_steps
         )
+        exit_code = 0
+        return result
     finally:
-        output.close()
+        output.close(exit_code=exit_code)
 
 
 def main():
@@ -130,7 +144,9 @@ def main():
     parser.add_argument("--scope", choices=("full", "frozen_encoder"), required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
-        "--wandb-mode", choices=("offline", "online", "disabled"), default="offline"
+        "--wandb-mode",
+        choices=("offline", "online", "disabled"),
+        default=os.environ.get("WANDB_MODE", "online"),
     )
     parser.add_argument("--max-steps", type=int)
     args = parser.parse_args()

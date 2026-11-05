@@ -5,8 +5,9 @@ from core.visualization import training_contact_sheet
 
 
 class TrainingOutput:
-    def __init__(self, path, tracking=None):
+    def __init__(self, path, tracking=None, image_factory=None):
         self.path, self.tracking = path, tracking
+        self.image_factory = image_factory
 
     def record(self, channel, record):
         with (self.path / f"{channel}.jsonl").open("a") as stream:
@@ -21,18 +22,42 @@ class TrainingOutput:
             }
             self.tracking.log(metrics)
         if self.tracking and channel == "summary":
-            self.tracking.log({"heldout/mean_iou": record["mean_iou"], "epoch": record["epoch"]})
+            self.tracking.log(
+                {
+                    "heldout/mean_iou": record["mean_iou"],
+                    "heldout/mean_loss": record["mean_loss"],
+                    "heldout/instances": record["instances"],
+                    "heldout/epoch": record["epoch"],
+                }
+            )
 
     def save_json(self, name, record):
         (self.path / f"{name}.json").write_text(
             json.dumps(record, indent=2, allow_nan=False) + "\n"
         )
+        if self.tracking and name == "complete":
+            self.tracking.summary.update(
+                {
+                    f"run/{key}": record[key]
+                    for key in ("steps", "wall_seconds", "peak_gpu_memory_bytes")
+                }
+            )
 
     def preview(self, sample, point, before, after, epoch, index):
-        training_contact_sheet(
-            self.path / "previews" / f"epoch-{epoch}-{index}.png", sample, point, before, after
-        )
+        path = self.path / "previews" / f"epoch-{epoch}-{index}.png"
+        training_contact_sheet(path, sample, point, before, after)
+        if self.tracking and self.image_factory:
+            caption = (
+                f"{sample['__key__']}: target-point prompt; "
+                f"IoU before={before['iou']:.3f}, after={after['iou']:.3f}"
+            )
+            self.tracking.log(
+                {
+                    "examples/epoch": epoch,
+                    f"examples/instance_{index}": self.image_factory(str(path), caption=caption),
+                }
+            )
 
-    def close(self):
+    def close(self, exit_code=0):
         if self.tracking:
-            self.tracking.finish()
+            self.tracking.finish(exit_code=exit_code)
