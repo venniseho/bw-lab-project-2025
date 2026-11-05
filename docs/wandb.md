@@ -39,8 +39,8 @@ contain only what that run originally logged; new image logging is not retroacti
 ```bash
 cd /project/aip-sven/vho/bw-lab-project-2025
 git fetch origin
-git switch refactor/project-cleanup
-git pull --ff-only origin refactor/project-cleanup
+git switch main
+git pull --ff-only origin main
 python -m pip install -e . --no-deps
 
 POINT_ROOT=/scratch/vho/sam3-whole-scene/point-training.DAHWRv
@@ -56,9 +56,8 @@ and the log prints `W&B dashboard: ...` after successful W&B initialization. Thi
 first online smoke run also validates the refactored code on the GPU. Use a fresh
 output directory each time; the existing offline smoke results remain available.
 
-If staying on `performance`, exporting `WANDB_MODE=online` also enables its
-existing scalar logging; the new axes, grouping and preview uploads require the
-updated cleanup branch. Do not switch branches while a job still uses that checkout.
+Use `main` for evaluation and fine-tuning after this merge. Do not switch
+branches while a job still uses that checkout.
 
 ## What the dashboard contains
 

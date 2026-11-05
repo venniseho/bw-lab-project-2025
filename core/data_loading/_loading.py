@@ -17,7 +17,7 @@ def build_loader(
     prefetch_factor: int = 2,
     seed: int = 0,
 ) -> DataLoader:
-    """Shuffle training only. Callers explicitly provide disjoint split datasets."""
+    """Shuffle training only. Callers explicitly provide disjoint split core.data_loading."""
     import torch
 
     if split not in ("train", "val", "test"):

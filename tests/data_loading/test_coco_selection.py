@@ -8,7 +8,7 @@ import unittest
 
 import numpy as np
 
-from datasets.selection import (
+from core.data_loading.selection import (
     load_coco_image_instances,
     prepare_selected_probe,
     summarize_selection,

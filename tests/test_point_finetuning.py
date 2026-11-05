@@ -12,7 +12,7 @@ import torch
 from torch import nn
 from PIL import Image
 
-from datasets.point_training import dataset, loader
+from core.data_loading.point_training import dataset, loader
 from core.samples import foreground_point
 from core.trainer import checkpoint, PointTrainer
 from core.models.point_sam3 import check_step, gradient_probes

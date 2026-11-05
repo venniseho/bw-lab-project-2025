@@ -10,7 +10,7 @@ pycocotools; an existing COCO API is injected rather than downloaded.
 
 ```python
 from torchvision.transforms import Compose
-from datasets import ImageMaskDataset, CocoInstanceDataset, build_loader
+from core.data_loading import ImageMaskDataset, CocoInstanceDataset, build_loader
 from core.stimuli import FenceOcclusion, ContourFragmentation
 from core.stimuli import FragmentationConfig
 
@@ -108,7 +108,7 @@ The primary configured entrypoint is now
 which wires the DataModule, transforms, Sam3GridAdapter, Runner and concrete
 SceneProposalTask together. See the [experiment guide](../experiments/sam3_fragmentation/README.md)
 for JSON configuration and `prepare`/`run` commands. New code imports the reusable
-`core` and `datasets` packages; the old package names have been removed.
+`core`, including `core/data_loading`,; the old package names have been removed.
 
 For in-memory integration, `core.models.sam3.Sam3GridAdapter.predict()` reuses
 `collect_proposals` on an already loaded model/processor. `core.runner.Runner`
@@ -119,7 +119,7 @@ and reports artifact locations/counts, without introducing quantitative scores.
 The old `run_pipeline` callable interface remains for compatibility.
 
 ```python
-from datasets import ManifestDataModule
+from core.data_loading import ManifestDataModule
 from core.models import Sam3GridAdapter
 from core.runner import Runner
 from core.tasks.scene_proposals import SceneProposalTask

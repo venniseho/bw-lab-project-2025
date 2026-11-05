@@ -13,7 +13,7 @@ import numpy as np
 from PIL import Image
 from torch.utils.data import SequentialSampler
 
-from datasets import DataModule, ManifestDataModule
+from core.data_loading import DataModule, ManifestDataModule
 from core.models import Sam3GridAdapter
 from core.runner import Runner
 from core.tasks.scene_proposals import SceneProposalTask

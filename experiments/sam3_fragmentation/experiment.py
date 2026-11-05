@@ -15,8 +15,8 @@ import platform
 from pathlib import Path
 from typing import Literal
 
-from datasets import DataModule, ManifestDataModule
-from datasets.conditions import ConditionDataset
+from core.data_loading import DataModule, ManifestDataModule
+from core.data_loading.conditions import ConditionDataset
 from core.infrastructure import file_fingerprint, require_slurm_step
 from core.models import Sam3GridAdapter
 from core.models.sam3 import load_scene_model

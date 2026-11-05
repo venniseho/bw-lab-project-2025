@@ -8,7 +8,7 @@ from pathlib import Path
 import time
 import torch
 
-from datasets._base import DataModule
+from core.data_loading._base import DataModule
 from core.models._base import Model
 from core.tasks._base import Evaluator, Task
 

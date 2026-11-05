@@ -7,7 +7,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from datasets import ImageMaskDataset
+from core.data_loading import ImageMaskDataset
 
 
 def select_records(repo: Path, count: int) -> list[dict]:

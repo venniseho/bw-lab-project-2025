@@ -17,7 +17,7 @@ training = ["pycocotools", "wandb", "psutil"]
 dev = ["ruff"]
 
 [tool.setuptools.packages.find]
-include = ["core*", "datasets*", "experiments*"]
+include = ["core*", "experiments*"]
 
 [tool.setuptools.package-data]
 "experiments.sam3_fragmentation" = ["configs/*.json", "README.md"]

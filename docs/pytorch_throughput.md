@@ -83,7 +83,7 @@ Start in the project checkout and activate the existing environment:
 cd /project/aip-sven/vho/bw-lab-project-2025
 git fetch origin --prune
 git switch performance
-git pull --ff-only origin performance
+git pull --ff-only origin main
 
 module load python/3.12.4
 module load opencv/4.12.0

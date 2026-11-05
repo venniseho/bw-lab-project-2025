@@ -13,7 +13,7 @@ import random
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from datasets.download import BASE, download, ensure_annotations
+from core.data_loading.download import BASE, download, ensure_annotations
 
 
 def annotations(root, allow_download):

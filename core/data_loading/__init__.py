@@ -1,4 +1,4 @@
-"""Datasets and explicit data modules, independent of experiment wiring."""
+"""Dataset loaders, source splits and data modules, separate from stored data."""
 
 from ._base import DataModule
 from ._loading import build_loader, collate_samples

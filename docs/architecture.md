@@ -2,19 +2,18 @@
 
 The layout follows [mlvbench](https://github.com/mtangemann/mlvbench): reusable
 components, small experiment assembly functions, and separate cluster launchers.
-Dataset loading is a top-level package at the project's author's request.
+Dataset loader implementations live in core/data_loading; data/ holds actual files.
 
 ```text
-datasets/
-  coco.py, coco_manifest.py       Lazy COCO image/instance loading
-  image_mask.py, manifest.py      Explicit image/mask manifests
-  selection.py                   Instance validity and exclusion reasons
-  splits.py                      Disjoint source-image training splits
-  download.py                    Atomic, cached official COCO downloads
-  conditions.py                  Apply each condition to the original sample
-  point_training.py              Tiny point-training dataset and loader
-
 core/
+  data_loading/
+    coco.py, coco_manifest.py       Lazy COCO image/instance loading
+    image_mask.py, manifest.py      Explicit image/mask manifests
+    selection.py                   Instance validity and exclusion reasons
+    splits.py                      Disjoint source-image training splits
+    download.py                    Atomic, cached official COCO downloads
+    conditions.py                  Apply each condition to the original sample
+    point_training.py              Tiny point-training dataset and loader
   models/
     sam3.py                      Native model loading and grid adapter
     batched_sam3.py               Batched evaluation adapter
@@ -82,7 +81,7 @@ point-prompt training does not import its configuration, trainer or loss.
 
 ## Local cleanup and compatibility
 
-The former `bwlab` package is now `core`; its dataset modules are now `datasets`.
+The former `bwlab` package is now `core`; its dataset loaders live in `core/data_loading`.
 Update external Python imports accordingly and refresh the editable install with
 `python -m pip install -e . --no-deps`. Repository/Vulcan paths and active command
 filenames remain unchanged. There is no compatibility package hiding the rename.

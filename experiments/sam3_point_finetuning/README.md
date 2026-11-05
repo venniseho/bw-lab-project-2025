@@ -45,7 +45,7 @@ forward computation; loss and stored parameters remain float32.
 The initial subset is eight training source images and four disjoint held-out
 source images, all from **train2017**. Every noncrowd instance in those images is
 one sample, so there may be more than eight training steps per epoch. **val2017
-is untouched.** Clean images only: `datasets.point_training.dataset(..., transform=...)` is the
+is untouched.** Clean images only: `core.data_loading.point_training.dataset(..., transform=...)` is the
 in-memory hook for later fragmentation/fence experiments; the launcher currently
 rejects any non-identity transform configuration.
 
@@ -62,7 +62,7 @@ data, prompts, loss and optimization before concluding an architecture limitatio
 
 ```bash
 cd /project/aip-sven/vho/bw-lab-project-2025
-git pull --ff-only origin performance
+git pull --ff-only origin main
 module load python/3.12.4
 module load opencv/4.12.0
 bash scripts/setup_native_training_env.sh
@@ -148,7 +148,7 @@ completed offline smoke run. Set `WANDB_MODE=offline` for a disconnected job.
 
 ## Implementation map
 
-`experiment.py` constructs the components. `datasets/point_training.py` loads
+`experiment.py` constructs the components. `core/data_loading/point_training.py` loads
 instances; `core/models/point_sam3.py` owns the native differentiable point path;
 `core/tasks/point_segmentation.py` computes the loss; `core/trainer.py` runs the
 optimization/evaluation loop; `core/training_output.py` stores logs and previews.

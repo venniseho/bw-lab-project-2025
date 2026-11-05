@@ -72,7 +72,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 from pycocotools.coco import COCO
-from datasets.selection import (
+from core.data_loading.selection import (
     load_coco_image_instances, prepare_selected_probe, summarize_selection,
 )
 from evaluation.preparation import OcclusionCondition

@@ -9,9 +9,9 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.models.sam3 import VERIFIED_SAM3_API_REVISION
-from datasets.download import ensure_annotations
-from datasets.splits import select_splits, validate_masks
-from datasets.download import BASE, download
+from core.data_loading.download import ensure_annotations
+from core.data_loading.splits import select_splits, validate_masks
+from core.data_loading.download import BASE, download
 
 
 def _parse_args(argv=None):

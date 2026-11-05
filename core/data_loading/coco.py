@@ -7,7 +7,7 @@ from typing import Callable
 import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
-from datasets.selection import load_coco_image_instances
+from core.data_loading.selection import load_coco_image_instances
 from core.stimuli.transforms import validate_sample
 
 

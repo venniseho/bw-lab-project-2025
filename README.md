@@ -6,8 +6,7 @@ then fine-tune the point-prompted model using controlled comparisons.
 ## Project map
 
 ```text
-core/           Models, transforms, evaluation, rendering and the training loop
-datasets/       Dataset loaders, source splits and cached COCO downloads
+core/           Data loading, models, transforms, evaluation and training
 experiments/    Configuration and the code that assembles an experiment
 scripts/        Commands, figures and Vulcan job submission
 tests/          Regression tests and small offline fixtures
@@ -23,7 +22,8 @@ There are two active experiments:
   comparing the full point path against a frozen image encoder.
 
 Each experiment's `experiment.py` puts together datasets, transforms, a model and
-a runner/trainer. Reusable implementations live in `core/` and `datasets/`.
+a runner/trainer. Reusable implementations live in `core/`; dataset loaders
+are in `core/data_loading/`, and actual images/annotations belong in `data/`.
 This follows the library/experiment separation in
 [Matthias's mlvbench](https://github.com/mtangemann/mlvbench).
 
@@ -45,8 +45,8 @@ python -m pip install -e . --no-deps
 python -B -m unittest discover -s tests -t . -v
 ```
 
-The explicit test root (`-t .`) keeps `tests/datasets` separate from the actual
-`datasets` package. GPU commands require a Slurm GPU job step; CPU tests do not
+The explicit test root (`-t .`) keeps test imports consistent. GPU commands require
+a Slurm GPU job step; CPU tests do not
 establish SAM3 GPU training success or improved segmentation accuracy.
 
 ## Results and historical material

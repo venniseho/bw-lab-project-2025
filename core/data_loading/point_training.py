@@ -6,7 +6,7 @@ from pathlib import Path
 
 from torch.utils.data import DataLoader
 
-from datasets.coco_manifest import CocoManifestDataset
+from core.data_loading.coco_manifest import CocoManifestDataset
 
 
 def dataset(annotation_file, transform=None):

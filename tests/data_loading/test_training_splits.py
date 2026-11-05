@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 import unittest
-from datasets.splits import select_splits
+from core.data_loading.splits import select_splits
 
 
 class TrainingSplitTests(unittest.TestCase):

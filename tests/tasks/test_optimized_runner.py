@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image
 import torch
 
-from datasets import DataModule
+from core.data_loading import DataModule
 from core.runtime import RuntimeConfig
 from core.runner import Runner
 from core.tasks.summary import SummaryTask

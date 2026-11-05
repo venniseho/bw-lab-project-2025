@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image
 from torchvision.transforms import Compose
 
-from datasets import ImageMaskDataset, CocoInstanceDataset, build_loader
+from core.data_loading import ImageMaskDataset, CocoInstanceDataset, build_loader
 from core.runner import run_pipeline
 from scripts.prepare_stimuli import main
 from core.stimuli.transforms import FenceOcclusion

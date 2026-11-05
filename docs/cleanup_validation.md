@@ -10,7 +10,7 @@ Branch: `refactor/project-cleanup`, based on `cb240b7`.
 * All 18 active Python command entry points accept `--help`.
 * All shell/Slurm scripts pass `bash -n`.
 * Ruff source checks and formatting pass; the frozen reference is excluded.
-* The package wheel builds with the new `core` and `datasets` packages.
+* The package wheel builds with `core`, including its `data_loading` subpackage.
 * The offline pilot still prepares ten distinct original image/mask pairs.
 
 The previous suite had 139 tests. Four tests specific to the rejected concept

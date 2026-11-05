@@ -11,7 +11,7 @@ import subprocess
 import numpy as np
 import torch
 
-from datasets.point_training import dataset, loader
+from core.data_loading.point_training import dataset, loader
 from core.infrastructure import require_slurm_step
 from core.models.point_sam3 import PointSegmenter, native_parity
 from core.models.sam3 import load_scene_model, VERIFIED_SAM3_API_REVISION

@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image
 from pycocotools.coco import COCO
 
-from datasets.manifest import ManifestDataModule
+from core.data_loading.manifest import ManifestDataModule
 from scripts.prepare_coco_validation import download, main, select_records
 
 
@@ -28,14 +28,16 @@ class CocoManifestTests(TestCase):
     def test_download_is_atomic_and_reuses_existing_files(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "val2017" / "image.jpg"
-            with patch("datasets.download.urlopen", return_value=io.BytesIO(b"image")) as fetch:
+            with patch(
+                "core.data_loading.download.urlopen", return_value=io.BytesIO(b"image")
+            ) as fetch:
                 download("https://example.invalid/image.jpg", path)
                 download("https://example.invalid/image.jpg", path)
                 self.assertEqual(fetch.call_count, 1)
             self.assertEqual(path.read_bytes(), b"image")
             self.assertFalse(path.with_suffix(".jpg.part").exists())
             failed = path.with_name("failed.jpg")
-            with patch("datasets.download.urlopen", side_effect=OSError("network")):
+            with patch("core.data_loading.download.urlopen", side_effect=OSError("network")):
                 with self.assertRaises(OSError):
                     download("https://example.invalid/failed.jpg", failed)
             self.assertFalse(failed.exists())
