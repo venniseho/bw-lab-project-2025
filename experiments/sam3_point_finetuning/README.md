@@ -121,6 +121,15 @@ the scope, target, preprocessing or precision. Every output directory must be ne
 * `audit.json`: actual nonzero encoder/decoder gradients as required by scope,
   and measured changes to checked weights after the first optimizer step.
 * `train.jsonl`: per-instance loss components, selected-mask IoU and gradient norm.
+* `timing.jsonl`: separate baseline validation, training epoch and post-training
+  validation wall times and throughput, also logged under `timing/*` in W&B.
+  Timers include loading/waiting, computation, metrics, logging and selected
+  previews; exclude model initialization and checkpoint saving. CUDA synchronizes
+  at phase boundaries. `images_per_second` counts image presentations (one per
+  target mask, including repeated source images); `unique_source_images` and
+  `unique_source_images_per_second` separately report source coverage. These are
+  end-to-end phase rates, not isolated GPU kernel timings. Metadata records actual
+  training/validation image and target-mask counts; no final test is run here.
 * `heldout.jsonl`, `summary.jsonl`: baseline at epoch 0, then held-out scores after
   each epoch. The lowest-loss training candidate is not used for evaluation.
 * `previews/epoch-*.png`: the first four held-out instances, with input point,

@@ -19,6 +19,7 @@ from core.models.point_sam3 import check_step, gradient_probes, enable_encoder_a
 from core.tasks.point_segmentation import mask_loss, forward_sample, random_target_point
 from core.models.point_sam3 import point_forward, set_scope, PointSegmenter
 from core.training_output import TrainingOutput
+from core.training_timing import PhaseTiming
 
 
 class Backbone(nn.Module):
@@ -99,6 +100,19 @@ def tiny_model():
 
 
 class PointTrainingTests(unittest.TestCase):
+    def test_phase_throughput_distinguishes_repeated_images_from_sources(self):
+        model, _ = tiny_model()
+        with patch("core.training_timing.time.perf_counter", side_effect=[100.0, 104.0]):
+            timer = PhaseTiming(model, "train", 1)
+            for key, image_id in (("a", 10), ("b", 10), ("c", 20)):
+                timer.observe({"__key__": key, "metadata": {"image_id": image_id}})
+            report = timer.finish()
+        self.assertEqual(report["instances"], 3)
+        self.assertEqual(report["unique_source_images"], 2)
+        self.assertEqual(report["wall_seconds"], 4.0)
+        self.assertEqual(report["images_per_second"], 0.75)
+        self.assertEqual(report["unique_source_images_per_second"], 0.5)
+
     def test_inference_only_encoder_mlp_supports_backward_without_changing_state_keys(self):
         def inference_only_forward(module, x):
             if torch.is_grad_enabled():
@@ -167,6 +181,13 @@ class PointTrainingTests(unittest.TestCase):
                     json.loads(line) for line in (output / "summary.jsonl").read_text().splitlines()
                 ]
                 self.assertEqual([row["epoch"] for row in summaries], [0, 1])
+                timings = [
+                    json.loads(line) for line in (output / "timing.jsonl").read_text().splitlines()
+                ]
+                self.assertEqual(
+                    [row["phase"] for row in timings], ["validation", "train", "validation"]
+                )
+                self.assertEqual([row["instances"] for row in timings], [1, 1, 1])
                 self.assertTrue((output / "previews/epoch-1-0.png").is_file())
                 self.assertTrue((output / "complete.json").is_file())
                 state = torch.load(output / "checkpoint.pt", weights_only=True)

@@ -85,6 +85,9 @@ def build_output(path, metadata, wandb_mode):
         tracking.define_metric("heldout/*", step_metric="heldout/epoch")
         tracking.define_metric("examples/epoch")
         tracking.define_metric("examples/*", step_metric="examples/epoch")
+        for phase in ("train", "validation"):
+            tracking.define_metric(f"timing/{phase}/epoch")
+            tracking.define_metric(f"timing/{phase}/*", step_metric=f"timing/{phase}/epoch")
         if wandb_mode == "online":
             print(f"W&B dashboard: {tracking.url}", flush=True)
     output = TrainingOutput(path, tracking, image_factory=wandb.Image if tracking else None)
@@ -113,6 +116,13 @@ def run(config, scope, output, wandb_mode="online", max_steps=None):
         "precision": "bf16 forward, float32 loss/parameters",
         "max_steps": max_steps,
         "point_policy": "uniform_foreground_fixed_per_instance",
+        "dataset_counts": {
+            name: {
+                "unique_images": len({record["image_id"] for record in data.records}),
+                "target_masks": len(data),
+            }
+            for name, data in (("train", train), ("validation", heldout))
+        },
         "native_parity": native_parity(model, processor, heldout[0]),
     }
     output = build_output(path, metadata, wandb_mode)

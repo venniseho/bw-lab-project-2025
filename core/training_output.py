@@ -12,8 +12,16 @@ class TrainingOutput:
     def record(self, channel, record):
         with (self.path / f"{channel}.jsonl").open("a") as stream:
             stream.write(json.dumps(record, allow_nan=False) + "\n")
-        if channel in ("train", "summary"):
+        if channel in ("train", "summary", "timing"):
             print(json.dumps(record), flush=True)
+        if self.tracking and channel == "timing":
+            self.tracking.log(
+                {
+                    f"timing/{record['phase']}/{key}": value
+                    for key, value in record.items()
+                    if isinstance(value, (int, float))
+                }
+            )
         if self.tracking and channel == "train":
             metrics = {
                 f"train/{key}": value

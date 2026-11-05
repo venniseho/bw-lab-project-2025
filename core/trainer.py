@@ -6,6 +6,8 @@ from typing import Protocol
 import numpy as np
 import torch
 
+from core.training_timing import PhaseTiming
+
 
 class TrainableSegmenter(Protocol):
     model: torch.nn.Module
@@ -75,18 +77,23 @@ class PointTrainer:
 
     def train_epoch(self, samples, epoch, max_steps=None):
         self.segmenter.train(True)
+        timing = PhaseTiming(self.segmenter.model, "train", epoch)
         for sample in samples:
             self.train_step(sample, epoch)
+            timing.observe(sample)
             if max_steps is not None and self.steps >= max_steps:
                 break
+        self.output.record("timing", timing.finish())
 
     @torch.no_grad()
     def evaluate(self, samples, epoch, baseline=None):
         self.segmenter.train(False)
+        timing = PhaseTiming(self.segmenter.model, "validation", epoch)
         rows, examples = [], {}
         for index, sample in enumerate(samples):
             _, metrics, logits, scores, point = self.task(self.segmenter, sample)
             rows.append(metrics)
+            timing.observe(sample)
             self.output.record(
                 "heldout", {"phase": "heldout", "epoch": epoch, "key": sample["__key__"], **metrics}
             )
@@ -100,6 +107,7 @@ class PointTrainer:
                     self.output.preview(
                         sample, point, baseline[sample["__key__"]], prediction, epoch, index
                     )
+        self.output.record("timing", timing.finish())
         summary = {
             "phase": "heldout_summary",
             "epoch": epoch,

@@ -14,6 +14,26 @@ from experiments.sam3_point_finetuning.experiment import build_output
 
 
 class TrainingOutputTests(unittest.TestCase):
+    def test_timing_is_saved_locally_and_logged_to_separate_cloud_phase(self):
+        with tempfile.TemporaryDirectory() as folder:
+            run = Mock()
+            output = TrainingOutput(Path(folder), run)
+            report = {
+                "phase": "validation",
+                "epoch": 0,
+                "instances": 504,
+                "images_per_second": 10.0,
+            }
+            output.record("timing", report)
+            self.assertEqual(json.loads((Path(folder) / "timing.jsonl").read_text()), report)
+            run.log.assert_called_with(
+                {
+                    "timing/validation/epoch": 0,
+                    "timing/validation/instances": 504,
+                    "timing/validation/images_per_second": 10.0,
+                }
+            )
+
     def test_online_setup_uses_workspace_and_distinct_metric_axes(self):
         run = Mock(url="https://wandb.ai/example/project/runs/test")
         sdk = SimpleNamespace(init=Mock(return_value=run), Image=Mock())
