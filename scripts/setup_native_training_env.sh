@@ -42,8 +42,9 @@ import sys
 pins = json.loads((Path(sys.prefix)/'base_versions.json').read_text())
 assert all(version(name) == value for name, value in pins.items()), 'Working stack versions changed'
 import torch
-from sam3.train.trainer import Trainer
-from sam3.train.loss.loss_fns import Masks
-print('Training imports available; torch:', torch.__version__)
+from sam3.sam.prompt_encoder import PromptEncoder
+from sam3.sam.mask_decoder import MaskDecoder
+from sam3.sam.transformer import TwoWayTransformer
+print('Native interactive training imports available; torch:', torch.__version__)
 PY
 echo "Training environment ready: $destination"

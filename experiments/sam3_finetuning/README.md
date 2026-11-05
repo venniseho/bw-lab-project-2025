@@ -1,3 +1,9 @@
+# Superseded for the perceptual-grouping experiment
+
+This folder trains the concept-segmentation branch. The requested point-prompt
+experiment now lives in [sam3_point_finetuning](../sam3_point_finetuning/README.md).
+Use that folder's commands; the older commands below target a different task.
+
 # Native SAM3 segmentation training smoke check
 
 The first objective is verified mask-loss backpropagation and a saved checkpoint,
