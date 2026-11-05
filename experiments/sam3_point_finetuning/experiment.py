@@ -1,6 +1,7 @@
 """Assemble the clean single-point SAM3 fine-tuning experiment."""
 
 import argparse
+from functools import partial
 import hashlib
 import json
 import os
@@ -111,6 +112,7 @@ def run(config, scope, output, wandb_mode="online", max_steps=None):
         "gpu": torch.cuda.get_device_name(),
         "precision": "bf16 forward, float32 loss/parameters",
         "max_steps": max_steps,
+        "point_policy": "uniform_foreground_fixed_per_instance",
         "native_parity": native_parity(model, processor, heldout[0]),
     }
     output = build_output(path, metadata, wandb_mode)
@@ -126,7 +128,9 @@ def run(config, scope, output, wandb_mode="online", max_steps=None):
         ),
         flush=True,
     )
-    trainer = PointTrainer(segmenter, optimizer, forward_sample, output)
+    trainer = PointTrainer(
+        segmenter, optimizer, partial(forward_sample, seed=config["seed"]), output
+    )
     exit_code = 1
     try:
         result = trainer.fit(

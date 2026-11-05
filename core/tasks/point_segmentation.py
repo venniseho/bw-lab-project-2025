@@ -1,8 +1,21 @@
 """SAM-inspired single-point mask supervision; not Meta's full training recipe."""
 
+import hashlib
+
+import numpy as np
 import torch
 from torch.nn import functional as F
-from core.samples import foreground_point
+
+
+def random_target_point(mask, key, seed=42):
+    """Sample uniformly inside the target; keep each seeded instance reproducible."""
+    ys, xs = np.nonzero(mask)
+    if not len(xs):
+        raise ValueError("No visible foreground pixel available for a positive prompt")
+    digest = hashlib.sha256(f"{seed}:{key}".encode()).digest()
+    rng = np.random.default_rng(int.from_bytes(digest[:8], "little"))
+    index = rng.integers(len(xs))
+    return [float(xs[index]), float(ys[index])]
 
 
 def candidate_ious(logits, target):
@@ -37,10 +50,10 @@ def mask_loss(logits, scores, target):
     }
 
 
-def forward_sample(segmenter, sample):
+def forward_sample(segmenter, sample, seed=42):
     """Build the target prompt, then supervise one object's three candidates."""
     prompt_mask = sample.get("visible_segmentation", sample["segmentation"])
-    point = foreground_point(prompt_mask)
+    point = random_target_point(prompt_mask, sample["__key__"], seed)
     logits, scores = segmenter.predict(sample["image"], point)
     target = torch.as_tensor(sample["segmentation"], device=logits.device, dtype=torch.float32)
     loss, metrics = mask_loss(logits, scores, target)

@@ -1,6 +1,7 @@
 """Differentiable version of Meta's pinned interactive image path."""
 
 from contextlib import nullcontext
+from types import MethodType
 
 import numpy as np
 import torch
@@ -15,6 +16,23 @@ DECODER = (
     "inst_interactive_predictor.model.sam_prompt_encoder.",
     "inst_interactive_predictor.model.sam_mask_decoder.",
 )
+
+
+def _autograd_mlp_forward(self, x):
+    """Keep native inference, but use differentiable linear+activation in training."""
+    if not torch.is_grad_enabled():
+        return type(self).forward(self, x)
+    x = self.act(self.fc1(x))
+    x = self.norm(self.drop1(x))
+    return self.drop2(self.fc2(x))
+
+
+def enable_encoder_autograd(model):
+    """Adapt the pinned ViT MLPs without changing weights or checkpoint keys."""
+    for module in model.backbone.vision_backbone.trunk.modules():
+        cls = type(module)
+        if cls.__module__ == "sam3.model.vitdet" and cls.__name__ == "Mlp":
+            module.forward = MethodType(_autograd_mlp_forward, module)
 
 
 def set_scope(model, scope):
@@ -156,6 +174,8 @@ class PointSegmenter:
     def __init__(self, model, processor, scope):
         self.model, self.processor, self.scope = model, processor, scope
         self.parameter_counts = set_scope(model, scope)
+        if scope == "full":
+            enable_encoder_autograd(model)
         model.backbone.act_ckpt_whole_vision_backbone = scope == "full"
 
     def predict(self, image, point):

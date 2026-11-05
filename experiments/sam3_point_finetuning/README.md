@@ -6,8 +6,9 @@ a small explicit PyTorch loop. It does not use Meta's concept-segmentation Train
 ## What one training step does
 
 1. Load an RGB image and one COCO instance's binary target mask.
-2. Choose one positive point: the foreground pixel nearest the mask centroid.
-   This always lands on the target, even if its centroid is outside the mask.
+2. Choose one positive point uniformly at random from the target's foreground.
+   The run seed and instance key fix that point across epochs and before/after
+   evaluation, so changes in the click do not confound the comparison.
 3. Apply native 1008-pixel preprocessing, image encoder, prompt encoder and
    interactive mask decoder. Three candidate masks and quality scores result.
 4. Compare candidates with the target and backpropagate
@@ -39,6 +40,9 @@ projections stay trainable even when the image encoder is frozen. Full means the
 active point-prompt model, not every unrelated SAM3 branch. The full run uses
 native activation checkpointing to reduce activation memory, at a compute cost.
 Both use identical initial weights, data, order, point rule, loss and learning rate.
+The pinned native vision MLP uses an inference-only fused operation. The full
+scope replaces that operation with ordinary differentiable linear + activation
+when gradients are enabled, retaining native inference and checkpoint keys.
 Encoder train/eval behavior follows its trainable/frozen status. BF16 is used for
 forward computation; loss and stored parameters remain float32.
 

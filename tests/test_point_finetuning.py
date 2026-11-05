@@ -15,8 +15,8 @@ from PIL import Image
 from core.data_loading.point_training import dataset, loader
 from core.samples import foreground_point
 from core.trainer import checkpoint, PointTrainer
-from core.models.point_sam3 import check_step, gradient_probes
-from core.tasks.point_segmentation import mask_loss, forward_sample
+from core.models.point_sam3 import check_step, gradient_probes, enable_encoder_autograd
+from core.tasks.point_segmentation import mask_loss, forward_sample, random_target_point
 from core.models.point_sam3 import point_forward, set_scope, PointSegmenter
 from core.training_output import TrainingOutput
 
@@ -99,6 +99,50 @@ def tiny_model():
 
 
 class PointTrainingTests(unittest.TestCase):
+    def test_inference_only_encoder_mlp_supports_backward_without_changing_state_keys(self):
+        def inference_only_forward(module, x):
+            if torch.is_grad_enabled():
+                raise ValueError("Expected grad to be disabled.")
+            return module.drop2(module.fc2(module.norm(module.drop1(module.act(module.fc1(x))))))
+
+        native_mlp = type(
+            "Mlp",
+            (nn.Module,),
+            {"__module__": "sam3.model.vitdet", "forward": inference_only_forward},
+        )
+        mlp = native_mlp()
+        mlp.fc1, mlp.fc2 = nn.Linear(4, 8), nn.Linear(8, 4)
+        mlp.act, mlp.norm = nn.GELU(), nn.LayerNorm(8)
+        mlp.drop1, mlp.drop2 = nn.Identity(), nn.Identity()
+        model, _ = tiny_model()
+        model.backbone.vision_backbone.trunk = nn.Sequential(mlp)
+        x = torch.randn(2, 4, requires_grad=True)
+        with self.assertRaisesRegex(ValueError, "Expected grad"):
+            mlp(x)
+        keys = list(model.state_dict())
+        with torch.no_grad():
+            reference = mlp(x)
+        enable_encoder_autograd(model)
+        actual = mlp(x)
+        torch.testing.assert_close(actual, reference)
+        actual.square().mean().backward()
+        for parameter in (mlp.fc1.weight, mlp.fc2.weight):
+            self.assertGreater(parameter.grad.abs().sum().item(), 0)
+        self.assertEqual(keys, list(model.state_dict()))
+        with torch.no_grad():
+            torch.testing.assert_close(mlp(x), reference)
+
+    def test_random_prompt_is_reproducible_inside_target_and_varies_across_seeds(self):
+        mask = np.zeros((8, 8), dtype=bool)
+        mask[1:3, 1:3] = mask[5:7, 5:7] = True
+        points = [random_target_point(mask, "object", seed) for seed in range(20)]
+        self.assertGreater(len({tuple(point) for point in points}), 1)
+        for seed, (x, y) in enumerate(points):
+            self.assertTrue(mask[int(y), int(x)])
+            self.assertEqual([x, y], random_target_point(mask, "object", seed))
+        with self.assertRaises(ValueError):
+            random_target_point(np.zeros((2, 2)), "empty")
+
     def test_injected_trainer_runs_baseline_updates_preview_and_reloadable_checkpoint(self):
         for scope in ("full", "frozen_encoder"):
             with self.subTest(scope=scope), tempfile.TemporaryDirectory() as folder:
