@@ -7,7 +7,7 @@ GPU execution is explicit, requires an existing SLURM step and submits no jobs.
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 import json
 import os
 import time
@@ -25,6 +25,7 @@ from core.stimuli import ContourFragmentation, FenceOcclusion, FragmentationConf
 from core.stimuli.export import prepare_stimuli
 from core.tasks.scene_proposals import SceneProposalTask
 from core.runtime import RuntimeConfig
+from core.evaluation_tracking import EvaluationTracking
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ class Config:
     save_candidate_limit: int | None = None
     runtime: RuntimeConfig | None = None
     max_inputs: int | None = None
+    wandb_mode: Literal["disabled", "offline", "online"] = "disabled"
 
 
 def build_conditions(config: Config) -> dict:
@@ -119,6 +121,18 @@ def prepare(config: Config, output_path: Path) -> dict:
 
 
 def run(config: Config, output_path: Path) -> dict:
+    """Monitor one evaluation arm without changing its model or scientific policy."""
+    if config.runtime is None or not config.runtime.allow_local:
+        require_slurm_step(os.environ)
+    if output_path.exists():
+        raise FileExistsError(output_path)
+    with EvaluationTracking(config.wandb_mode, output_path, asdict(config)) as tracking:
+        report = _run(config, output_path)
+        tracking.log_results()
+        return report
+
+
+def _run(config: Config, output_path: Path) -> dict:
     """Existing automatic grid protocol on configured stimuli, inside SLURM only.
 
     This archives proposals and targets; it does not extend quantitative metrics
@@ -289,8 +303,11 @@ def main(argv=None) -> None:
     parser.add_argument("command", choices=("prepare", "run"))
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--wandb-mode", choices=("disabled", "offline", "online"))
     args = parser.parse_args(argv)
     config = load_config(args.config)
+    if args.wandb_mode is not None:
+        config = replace(config, wandb_mode=args.wandb_mode)
     report = prepare(config, args.output) if args.command == "prepare" else run(config, args.output)
     print(f"{args.command}: {report['status']} -> {args.output}")
 

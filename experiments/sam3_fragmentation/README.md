@@ -74,3 +74,11 @@ Runs save `timing.json` plus `predictions/timings.csv`; GPU embedding and query
 measurements use explicit CUDA synchronization. Timing fields overlap and must
 not all be summed. This pilot is an integration/runtime check, not an unbiased
 accuracy evaluation.
+## Optional online GPU monitoring
+
+Use `scripts/prepare_monitored_evaluation.py` and
+`scripts/vulcan_pipeline_monitor.sbatch` to rerun both arms on the same 512
+sources with separate W&B dashboards. The original pretrained checkpoint and
+scientific policies are retained. See the
+[monitoring commands](../../docs/wandb.md#monitor-the-fence-and-fragmentation-evaluation).
+Ordinary evaluations and batch sweeps keep W&B disabled unless explicitly enabled.

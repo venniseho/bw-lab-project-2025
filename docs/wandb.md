@@ -85,3 +85,45 @@ incorrect saved login needs replacement.
 References: [W&B custom axes](https://docs.wandb.ai/models/track/log/customize-logging-axes),
 [official CLI implementation](https://github.com/wandb/wandb/blob/main/wandb/cli/cli.py),
 [automatic system metrics](https://wandb.ai/site/sdk/).
+
+## Monitor the fence and fragmentation evaluation
+
+This runs the original pretrained SAM3, not a fine-tuned checkpoint. It reuses
+the first 512 source/target records from the existing throughput inputs. Every
+source has four fence conditions and one fragmentation condition: 2,048 + 512
+inference inputs. This is one evaluation pass per arm, not another batch sweep.
+
+After login, entity/project exports and updating the checkout:
+
+```bash
+MON_ROOT=$(mktemp -d /scratch/vho/sam3-whole-scene/evaluation-monitor.XXXXXX)
+python scripts/prepare_monitored_evaluation.py \
+  --input-dir "$SCRATCH/bwlab-coco-throughput-512" \
+  --output-dir "$MON_ROOT/configs" --count 512 --workers 8
+
+JOB_ID=$(sbatch --parsable --output="$MON_ROOT/slurm-%j.out" \
+  scripts/vulcan_pipeline_monitor.sbatch "$PWD" "$MON_ROOT/configs" "$MON_ROOT/runs")
+echo "Job: $JOB_ID"
+echo "Results: $MON_ROOT"
+```
+
+Both arms run sequentially on one allocated GPU, requesting 12 CPU cores. They
+appear as separate W&B evaluation runs in a shared group. Fence batch size 1 and
+fragmentation batch size 2 use the earlier measured best settings. Workers are
+set to 8, as recommended in the meeting; this is not an isolated test of worker
+count. The original configurations, source selection, transforms and grid prompts
+are preserved. Previews and compilation are disabled for this profiling pass.
+
+W&B samples system usage across model loading and evaluation. Final timing
+summaries and score-selected condition IoU are uploaded; local per-input CSVs
+and `gpu_utilization.csv` remain on scratch. Each arm has its own dashboard URL
+in the Slurm log. The existing inference adapter remains under inference mode;
+no backward or weight update occurs.
+
+For GPU **compute activity**, inspect utilization against runtime, not a memory
+allocation bar. If W&B utilization remains empty, inspect the local GPU CSV to
+separate missing telemetry from genuinely low GPU activity. Sampling will not
+capture every roughly 100 ms inference individually. Online logging can add
+some overhead, so this run is a monitored diagnostic, not a replacement for the
+earlier unmonitored timing benchmark. Evaluation W&B logging is opt-in; ordinary
+benchmark commands remain disabled unless `--wandb-mode` is supplied.
