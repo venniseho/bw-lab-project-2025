@@ -57,7 +57,7 @@ class TrainingOutputTests(unittest.TestCase):
             )
             self.assertEqual(options["mode"], "online")
             run.define_metric.assert_any_call("train/*", step_metric="train/step")
-            run.define_metric.assert_any_call("heldout/*", step_metric="heldout/epoch")
+            run.define_metric.assert_any_call("heldout/*", step_metric="heldout/step")
             output.close()
             run.finish.assert_called_once()
 
@@ -79,6 +79,7 @@ class TrainingOutputTests(unittest.TestCase):
                     "heldout/mean_loss": 0.4,
                     "heldout/instances": 31,
                     "heldout/epoch": 0,
+                    "heldout/step": 0,
                 }
             )
             self.assertEqual(json.loads((Path(folder) / "summary.jsonl").read_text()), baseline)
@@ -99,7 +100,9 @@ class TrainingOutputTests(unittest.TestCase):
             self.assertEqual(render.call_args.args[0], path)
             self.assertEqual(image.call_args.args[0], str(path))
             self.assertIn("before=0.600, after=0.700", image.call_args.kwargs["caption"])
-            run.log.assert_called_with({"examples/epoch": 1, "examples/instance_0": "media"})
+            run.log.assert_called_with(
+                {"examples/epoch": 1, "examples/step": 0, "examples/instance_0": "media"}
+            )
 
     def test_disabled_tracking_needs_no_wandb_import(self):
         with tempfile.TemporaryDirectory() as folder, patch.dict(sys.modules, {"wandb": None}):

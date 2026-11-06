@@ -1,167 +1,158 @@
-# Point-prompt fine-tuning: start here
+# Point-prompt SAM3 training and validation
 
-This is the active fine-tuning experiment for the perceptual-grouping project. It uses Meta's native **interactive modules**, with
-a small explicit PyTorch loop. It does not use Meta's concept-segmentation Trainer.
+The active protocol is 1008x1008 preprocessing, batch size 1, one seeded random
+noncrowd target per source image, and one training epoch. Full point-path training
+updates the shared vision encoder, point encoder and mask decoder. The frozen
+scope updates only the point encoder and mask decoder. Language/concept/video
+branches are unused. BF16 forward, float32 weights/loss, AdamW lr=1e-5 and weight
+decay=.01, gradient clipping=1.0. This is our small PyTorch loop using Meta's native
+interactive modules, not its concept-segmentation Trainer.
 
-## What one training step does
+## Four controlled runs, after benchmarking
 
-1. Load an RGB image and one COCO instance's binary target mask.
-2. Choose one positive point uniformly at random from the target's foreground.
-   The run seed and instance key fix that point across epochs and before/after
-   evaluation, so changes in the click do not confound the comparison.
-3. Apply native 1008-pixel preprocessing, image encoder, prompt encoder and
-   interactive mask decoder. Three candidate masks and quality scores result.
-4. Compare candidates with the target and backpropagate
-   `20*focal(alpha=.25,gamma=2) + soft_Dice + quality_MSE`.
-5. Clip gradients and update trainable parameters with AdamW, learning rate 1e-5.
-
-An **instance mask** is simply the binary mask of one object: 1 for that object,
-0 elsewhere. This loss does not imply a text query or concept task. Focal loss
-penalizes incorrect pixel predictions; Dice measures foreground overlap; MSE
-teaches predicted quality scores to match measured mask IoU. Only the candidate
-with the smallest focal+Dice error receives mask supervision; quality supervision
-covers all three candidates. Evaluation selects the highest *predicted* quality,
-without using ground truth to select the mask.
-
-This is inspired by [SAM, Appendix A](https://arxiv.org/html/2304.02643v1), which
-describes the 20:1 mask losses, minimum-loss candidate and quality-score MSE.
-It is a small single-point sanity experiment, not reproduction of the full
-iterative-click training recipe or a published fine-tuning result.
-
-## Controlled comparison
-
-| Scope | Image encoder | Prompt encoder + mask decoder |
+| Scope | Training condition | Validation condition |
 |---|---|---|
-| `full` | Train shared vision trunk and interactive feature neck | Train |
-| `frozen_encoder` | Frozen, with no encoder autograd graph | Train |
+| full | fragmentation | fragmentation |
+| full | fence | fence |
+| frozen_encoder | fragmentation | fragmentation |
+| frozen_encoder | fence | fence |
 
-Unused concept/language/video modules stay frozen in both runs. Decoder feature
-projections stay trainable even when the image encoder is frozen. Full means the
-active point-prompt model, not every unrelated SAM3 branch. The full run uses
-native activation checkpointing to reduce activation memory, at a compute cost.
-Both use identical initial weights, data, order, point rule, loss and learning rate.
-The pinned native vision MLP uses an inference-only fused operation. The full
-scope replaces that operation with ordinary differentiable linear + activation
-when gradients are enabled, retaining native inference and checkpoint keys.
-Encoder train/eval behavior follows its trainable/frozen status. BF16 is used for
-forward computation; loss and stored parameters remain float32.
+Training order is seeded and shuffled; validation order is fixed.
+Each starts from the same original checkpoint, uses the same source images,
+selected object IDs, seeded points and transform settings, and runs independently.
+Run fragmentation first. Interval frequency and full-versus-subset validation
+must be selected after measuring validation cost; no full runs are submitted by
+preparation. Fence width is an explicit experimental parameter; the CLI's example
+starting value is 12 original-image pixels, spacing 40, angle 90 degrees.
 
-The initial subset is eight training source images and four disjoint held-out
-source images, all from **train2017**. Every noncrowd instance in those images is
-one sample, so there may be more than eight training steps per epoch. **val2017
-is untouched.** Clean images only: `core.data_loading.point_training.dataset(..., transform=...)` is the
-in-memory hook for later fragmentation/fence experiments; the launcher currently
-rejects any non-identity transform configuration.
+## Data and transforms
 
-This target-directed prompt differs from the earlier scene-wide 3x3 grid. The
-held-out results should be compared to this run's own pre-training baseline,
-not directly to the older grid-selected IoU figures.
+New preparation selects one random noncrowd annotation per image. Thus training
+steps equal eligible training images at batch size 1, rather than total objects.
+Images without a noncrowd target are excluded and counted explicitly. A fixed
+random target and foreground click are used throughout the run for reproducible
+comparisons. A fence click is selected on visible target support; if none remains,
+it falls back to original target support and records that it is not visible.
+For fragmentation, the point is inside the full target and may be on black canvas;
+`prompt_on_rendered_signal` records this. Labels remain the original binary mask.
 
-Similar improvements in both scopes would suggest encoder updates were not
-needed under these experimental conditions. A tiny run cannot establish that
-the decoder is sufficient in general. Failure to improve calls for checks of
-data, prompts, loss and optimization before concluding an architecture limitation.
+`--official-splits` uses train2017 for training and val2017 for validation. A count
+of 0 selects all eligible images in that official split. These are validation
+results, not a new blind test set. The earlier exploratory val2017 work still
+exists. Without that flag, small disjoint train2017 subsets remain available.
+Only missing JPEGs are downloaded and cached on Vulcan scratch. Transformations
+run in RAM in CPU loader workers; transformed JPEGs are not precomputed.
 
-## Vulcan: first prove that two updates work
+`--validation-image-count N` fixes a seeded image subset for baseline and interval
+checks. Without it, every prepared validation image is evaluated. If a subset is
+used, the baseline and end of training additionally evaluate all prepared validation images
+under `heldout_full/*`; the best checkpoint is selected only using interval data.
+The subset is fixed across intervals and runs, not resampled at every check.
+
+The fragmentation stimulus depends on the target mask. Different target objects
+can produce different input pixels, so their features cannot be shared. With one
+target and one point per image, one encoder pass is already sufficient. Several
+independent points on the same stimulus reuse a single encoder result. Features
+are scoped to a validation call and never retained across optimizer updates.
+
+## Benchmark validation first
+
+On Vulcan (no running job should be using the checkout while pulling):
 
 ```bash
 cd /project/aip-sven/vho/bw-lab-project-2025
 git pull --ff-only origin main
 module load python/3.12.4
 module load opencv/4.12.0
-bash scripts/setup_native_training_env.sh
 source /scratch/vho/sam3-whole-scene/train-env/bin/activate
-# Follow docs/wandb.md to log in and set your WANDB_ENTITY before submission.
+export WANDB_ENTITY=venniseho14-university-of-toronto
+export WANDB_PROJECT=SAM-finetuning
+export WANDB_MODE=online
 
-POINT_ROOT=$(mktemp -d /scratch/vho/sam3-whole-scene/point-training.XXXXXX)
-echo "Keep this path: $POINT_ROOT"
-
+BENCH_ROOT=$(mktemp -d /scratch/vho/sam3-whole-scene/point-validation.XXXXXX)
 python scripts/prepare_point_training.py \
   --native-root /project/aip-sven/vho/sam3 \
   --coco-root /scratch/vho/datasets/coco \
-  --output-dir "$POINT_ROOT/prepared" --download
+  --output-dir "$BENCH_ROOT/prepared" \
+  --official-splits --train-images 8 --heldout-images 512 \
+  --transform fragmentation --epochs 1 --workers 8 --download
 
-SMOKE_ID=$(sbatch --parsable --output="$POINT_ROOT/smoke-%j.out" \
-  scripts/vulcan_point_training.sbatch "$PWD" \
-  "$POINT_ROOT/prepared/config.json" frozen_encoder "$POINT_ROOT/smoke" 2)
-echo "Smoke job: $SMOKE_ID"
-echo "Results: $POINT_ROOT"
+BENCH_ID=$(sbatch --parsable --output="$BENCH_ROOT/slurm-%j.out" \
+  scripts/vulcan_point_validation.sbatch "$PWD" \
+  "$BENCH_ROOT/prepared/config.json" "$BENCH_ROOT/benchmark")
+echo "Job: $BENCH_ID"
+echo "Results: $BENCH_ROOT"
 ```
 
-Preparation downloads only missing selected train2017 images and caches them;
-the script does not download all training images or run a model on the login node.
-The annotation JSON may already be cached in the train/validation annotation ZIP.
-Training requires a Slurm GPU allocation and refuses the login node. Each job
-requests one GPU, 12 CPU cores, 64 GB host memory and eight loader workers.
+This is evaluation only: no backward, weight updates or checkpoints. One warmup
+image is excluded. Two repetitions alternate reference/shared order. It measures
+1 and 3 independent points per image; the 3-point case is a performance diagnostic,
+not a change to the one-point training protocol. Full before/after per-object
+metrics and compact selected masks are saved. Numerical differences are reported,
+not rejected for failing exact pixel equality. Repeat with `--transform fence`
+and explicit fence parameters in a new preparation/output directory.
 
-```bash
-sacct -j "$SMOKE_ID" --format=JobID,State,Elapsed,ExitCode
-tail -n 35 "$POINT_ROOT/smoke-${SMOKE_ID}.out"
-cat "$POINT_ROOT/smoke/complete.json"
-```
+Inspect `benchmark.csv`, `benchmark_samples.csv`, `benchmark-results.json`, W&B
+and the Slurm log. `encoder_forwards` should drop from three per image to one in
+the 3-point shared case. Actual GPU savings and full/subset duration must be
+measured; CPU toy-model tests cannot establish those numbers.
 
-After a successful smoke run, launch both independent two-epoch runs:
+## Interval planning and training
 
-```bash
-for SCOPE in frozen_encoder full; do
-  sbatch --output="$POINT_ROOT/${SCOPE}-%j.out" \
-    scripts/vulcan_point_training.sbatch "$PWD" \
-    "$POINT_ROOT/prepared/config.json" "$SCOPE" "$POINT_ROOT/$SCOPE"
-done
-```
+After benchmarking, prepare an official full-data configuration with
+`--train-images 0 --heldout-images 0 --epochs 1`, the selected transform, and an
+explicit `--validation-interval-steps N`. Optionally set
+`--validation-image-count M`. Decide N and M from measured cost, not arbitrary
+constants. Rough evaluation overhead is T_eval / (N*T_step + T_eval); checkpoint
+I/O adds to this. The checkpoint log reports its own cost.
 
-These are separate single-GPU jobs, not one model distributed across two GPUs.
-If a run fails or exhausts memory, inspect its log rather than silently changing
-the scope, target, preprocessing or precision. Every output directory must be new.
+The training launcher accepts `repo config scope output [max-steps]`. The optional
+last argument is only for smoke tests. Omitting it trains a complete epoch.
+Every output directory must be new. Each job requests one GPU, 12 CPUs, 64 GB host
+RAM and uses 8 loader workers. GPU execution requires a Slurm step; the code
+refuses inference/training on the login node. No four-job launch is automatic.
 
-## What to inspect and what has actually been tested
+## Saved outputs
 
-* `metadata.json`: native source/checkpoint provenance, split configuration,
-  parameter counts and pre-update agreement with native single-point inference.
-* `audit.json`: actual nonzero encoder/decoder gradients as required by scope,
-  and measured changes to checked weights after the first optimizer step.
-* `train.jsonl`: per-instance loss components, selected-mask IoU and gradient norm.
-* `timing.jsonl`: separate baseline validation, training epoch and post-training
-  validation wall times and throughput, also logged under `timing/*` in W&B.
-  Timers include loading/waiting, computation, metrics, logging and selected
-  previews; exclude model initialization and checkpoint saving. CUDA synchronizes
-  at phase boundaries. `images_per_second` counts image presentations (one per
-  target mask, including repeated source images); `unique_source_images` and
-  `unique_source_images_per_second` separately report source coverage. These are
-  end-to-end phase rates, not isolated GPU kernel timings. Metadata records actual
-  training/validation image and target-mask counts; no final test is run here.
-* `heldout.jsonl`, `summary.jsonl`: baseline at epoch 0, then held-out scores after
-  each epoch. The lowest-loss training candidate is not used for evaluation.
-* `previews/epoch-*.png`: the first four held-out instances, with input point,
-  COCO target, baseline mask and updated mask, each labelled with IoU.
-* `checkpoint.pt`: full model/optimizer state, scope and configuration. The file
-  is read back to verify its metadata; `complete.json` appears only on success.
+* Prepared `samples.csv`: split, image/annotation IDs, source path, target area,
+  seed. Prepared annotations, hashes and config retain labels and transform settings.
+* `train.csv` and `train.jsonl`: one row per update; source/target IDs and path,
+  dimensions, target/visible area, transform parameters/seed, point coordinates,
+  all candidate scores/IoUs, selected candidate, losses, gradient norm, compute
+  step time, epoch and global step.
+* `heldout.csv` and `heldout.jsonl`: the same per-object provenance and scores at
+  each validation, plus lossless selected-mask COCO RLE. The mask can be decoded
+  without rerunning SAM3. Candidate masks themselves are not all retained.
+* `summary.csv/jsonl`: baseline, interval/end and optional full-validation mean IoU
+  and loss. W&B uses global step, so several checks in one epoch stay distinct.
+* `timing.csv/jsonl`: end-to-end train/validation phase wall times, instance/image
+  presentation rates, unique-image coverage and encoder forward counts. Train time
+  excludes pauses for interval validation/checkpointing. Model initialization,
+  warmup and checkpoint I/O are outside phase rates; total run time includes
+  baseline, training, validation and checkpointing. CUDA synchronizes at phase
+  boundaries, not at every step. Images/sec counts presentations; one target per
+  image makes it equal source-image coverage for normal training/validation.
+* `checkpoints.csv/jsonl`: save time, path, size, epoch, step and validation IoU.
+  `checkpoint.pt` is latest; `checkpoint-best.pt` is best on the fixed interval
+  set, including baseline. Saves are atomic, include full model and optimizer
+  state, and are read back. Old latest snapshots are replaced, not accumulated.
+* `previews/`: four before/after held-out examples per check, named by epoch and
+  global step so interval images are not overwritten. W&B also receives previews.
+* `metadata.json`, `audit.json`, `complete.json`: code/checkpoint provenance,
+  hardware, split counts, gradient/weight-change checks and final summaries.
 
-The checkpoint uses BWLab format `bwlab_point_finetune_v1`, not Meta's original
-`detector.`/`tracker.` prefixes. To restore it, initialize the same native model
-using `load_scene_model` and the original checkpoint, then call
-`model.load_state_dict(torch.load(path, weights_only=True)['model'], strict=True)`.
-Do not pass this checkpoint directly to the existing evaluation CLI yet.
+Checkpoints remain on scratch and are not automatically uploaded to W&B. To reuse
+one, initialize the same native model from the original checkpoint, then load
+`torch.load(path, map_location='cpu', weights_only=True)['model']` with
+`model.load_state_dict(..., strict=True)`. This is BWLab checkpoint format, not
+Meta's checkpoint-prefix format. Exact interrupted-run resume is not implemented;
+the weights can be reused for evaluation or a new training experiment.
 
-CPU tests exercise gradient flow, frozen weights, trainable decoder projections,
-candidate selection, decreasing toy-model loss and checkpoint restoration. A local
-component check also passed backward through the pinned native prompt encoder,
-two-way transformer and mask decoder at reduced dimensions. Actual
-SAM3 GPU forward/backward, memory fit and learning remain to be tested on Vulcan.
-The first real job checks native-forward agreement before attempting updates.
-That is an implementation check, not a requirement that batched predictions match
-pixel-for-pixel, and not evidence of improved segmentation accuracy.
+## Loss
 
-W&B defaults to **online**. Authenticate with `wandb login` before submitting a
-job and set `WANDB_ENTITY` to your personal/team workspace. The log prints the
-dashboard link. Training/held-out curves use explicit step/epoch axes; selected
-before/after images are uploaded. Model checkpoints stay on scratch. See the
-[online setup guide](../../docs/wandb.md) for commands, including uploading the
-completed offline smoke run. Set `WANDB_MODE=offline` for a disconnected job.
-
-## Implementation map
-
-`experiment.py` constructs the components. `core/data_loading/point_training.py` loads
-instances; `core/models/point_sam3.py` owns the native differentiable point path;
-`core/tasks/point_segmentation.py` computes the loss; `core/trainer.py` runs the
-optimization/evaluation loop; `core/training_output.py` stores logs and previews.
+One positive point produces three masks. The smallest `20*focal + Dice` candidate
+receives mask supervision; all three quality scores receive IoU MSE supervision.
+Evaluation selects highest predicted quality, not ground-truth-best IoU.
+Total loss is `20*focal(alpha=.25,gamma=2) + soft_Dice + quality_MSE`.
+This follows [SAM Appendix A](https://arxiv.org/html/2304.02643v1) as a starting
+loss recipe, not the full original iterative-click training procedure.

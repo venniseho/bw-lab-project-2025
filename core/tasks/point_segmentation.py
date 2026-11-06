@@ -50,11 +50,27 @@ def mask_loss(logits, scores, target):
     }
 
 
-def forward_sample(segmenter, sample, seed=42):
+def forward_sample(segmenter, sample, seed=42, encoded=None):
     """Build the target prompt, then supervise one object's three candidates."""
     prompt_mask = sample.get("visible_segmentation", sample["segmentation"])
+    if not np.any(prompt_mask):
+        prompt_mask = sample["segmentation"]
     point = random_target_point(prompt_mask, sample["__key__"], seed)
-    logits, scores = segmenter.predict(sample["image"], point)
+    if encoded is None:
+        logits, scores = segmenter.predict(sample["image"], point)
+    else:
+        logits, scores = segmenter.predict_encoded(encoded, point, sample["image"].shape[:2])
     target = torch.as_tensor(sample["segmentation"], device=logits.device, dtype=torch.float32)
     loss, metrics = mask_loss(logits, scores, target)
+    selected = int(scores.detach().argmax())
+    metrics.update(selected_candidate=selected, point_x=point[0], point_y=point[1], point_seed=seed)
+    for index, (score, iou) in enumerate(zip(scores.detach(), candidate_ious(logits, target))):
+        metrics[f"candidate_{index}_score"] = float(score)
+        metrics[f"candidate_{index}_iou"] = float(iou)
+    metrics["prompt_on_visible_target"] = bool(
+        sample.get("visible_segmentation", sample["segmentation"])[int(point[1]), int(point[0])]
+    )
+    metrics["prompt_on_rendered_signal"] = bool(
+        np.any(sample["image"][int(point[1]), int(point[0])])
+    )
     return loss, metrics, logits, scores, point

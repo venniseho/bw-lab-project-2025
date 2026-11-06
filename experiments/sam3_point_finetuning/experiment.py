@@ -1,4 +1,4 @@
-"""Assemble the clean single-point SAM3 fine-tuning experiment."""
+"""Assemble clean or transformed single-point SAM3 fine-tuning experiments."""
 
 import argparse
 from functools import partial
@@ -19,6 +19,7 @@ from core.models.sam3 import load_scene_model, VERIFIED_SAM3_API_REVISION
 from core.tasks.point_segmentation import forward_sample
 from core.trainer import PointTrainer
 from core.training_output import TrainingOutput
+from core.stimuli.point_transforms import PointTransform
 
 
 def validate_config(config, max_steps):
@@ -29,8 +30,15 @@ def validate_config(config, max_steps):
         raise ValueError("max_steps must be positive")
     if config["epochs"] < 1 or config["workers"] < 0:
         raise ValueError("Positive epochs and nonnegative workers required")
-    if config["transform"] != "identity":
-        raise ValueError("Only the clean-image smoke test is configured")
+    if config["transform"] not in ("identity", "fence", "fragmentation"):
+        raise ValueError("Unknown point-prompt transform")
+    if config.get("resolution", 1008) != 1008:
+        raise ValueError("These experiments require native 1008x1008 preprocessing")
+    if (
+        config.get("validation_interval_steps") is not None
+        and config["validation_interval_steps"] < 1
+    ):
+        raise ValueError("Validation interval must be positive")
     revision = subprocess.check_output(
         ["git", "-C", config["native_root"], "rev-parse", "HEAD"], text=True
     ).strip()
@@ -47,8 +55,14 @@ def validate_config(config, max_steps):
 
 
 def build_data(config):
-    train = dataset(config["train_annotations"])
-    heldout = dataset(config["heldout_annotations"])
+    transform = PointTransform(
+        config["transform"], config["seed"], config.get("transform_parameters", {})
+    )
+    options = {"transform": transform, "one_per_image": True, "seed": config["seed"]}
+    train = dataset(config["train_annotations"], **options)
+    heldout = dataset(
+        config["heldout_annotations"], image_count=config.get("validation_image_count"), **options
+    )
     if not len(train) or not len(heldout):
         raise ValueError("Both instance splits must be nonempty")
     if {r["image_id"] for r in train.records} & {r["image_id"] for r in heldout.records}:
@@ -82,12 +96,16 @@ def build_output(path, metadata, wandb_mode):
         tracking.define_metric("train/step")
         tracking.define_metric("train/*", step_metric="train/step")
         tracking.define_metric("heldout/epoch")
-        tracking.define_metric("heldout/*", step_metric="heldout/epoch")
-        tracking.define_metric("examples/epoch")
-        tracking.define_metric("examples/*", step_metric="examples/epoch")
-        for phase in ("train", "validation"):
-            tracking.define_metric(f"timing/{phase}/epoch")
-            tracking.define_metric(f"timing/{phase}/*", step_metric=f"timing/{phase}/epoch")
+        tracking.define_metric("heldout/step")
+        tracking.define_metric("heldout/*", step_metric="heldout/step")
+        tracking.define_metric("heldout_full/step")
+        tracking.define_metric("heldout_full/*", step_metric="heldout_full/step")
+        for prefix in ("examples", "examples_full"):
+            tracking.define_metric(f"{prefix}/step")
+            tracking.define_metric(f"{prefix}/*", step_metric=f"{prefix}/step")
+        for phase in ("train", "validation", "validation_full"):
+            tracking.define_metric(f"timing/{phase}/step")
+            tracking.define_metric(f"timing/{phase}/*", step_metric=f"timing/{phase}/step")
         if wandb_mode == "online":
             print(f"W&B dashboard: {tracking.url}", flush=True)
     output = TrainingOutput(path, tracking, image_factory=wandb.Image if tracking else None)
@@ -110,6 +128,9 @@ def run(config, scope, output, wandb_mode="online", max_steps=None):
     metadata = {
         "config": config,
         "scope": scope,
+        "project_revision": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True
+        ).strip(),
         "trainable_parameters": segmenter.parameter_counts,
         "provenance": provenance,
         "gpu": torch.cuda.get_device_name(),
@@ -143,8 +164,17 @@ def run(config, scope, output, wandb_mode="online", max_steps=None):
     )
     exit_code = 1
     try:
+        final_validation = None
+        if config.get("validation_image_count") and config.get("full_validation_at_end", True):
+            _, final_validation = build_data({**config, "validation_image_count": None})
         result = trainer.fit(
-            loader(train, config["workers"]), loader(heldout, config["workers"]), config, max_steps
+            loader(train, config["workers"], shuffle=True, seed=config["seed"]),
+            loader(heldout, config["workers"]),
+            config,
+            max_steps,
+            final_validation_data=loader(final_validation, config["workers"])
+            if final_validation is not None
+            else None,
         )
         exit_code = 0
         return result

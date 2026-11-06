@@ -65,14 +65,9 @@ def train_mode(model, scope, training):
     model.backbone.vision_backbone.train(training and scope == "full")
 
 
-def point_forward(model, processor, image, point_xy, *, freeze_encoder):
-    """One image, one positive point, three differentiable candidate masks.
-
-    Do not use set_image/predict_inst here: those convenience methods disable
-    autograd. Decoder feature projections must remain outside no_grad.
-    """
-    predictor = model.inst_interactive_predictor
-    tracker = predictor.model
+def encode_point_image(model, processor, image, *, freeze_encoder):
+    """Encode once, retaining decoder projection gradients when encoder is frozen."""
+    tracker = model.inst_interactive_predictor.model
     pixels = _tensor_image(processor, image).unsqueeze(0)
     with torch.no_grad() if freeze_encoder else nullcontext():
         features = model.backbone.forward_image(pixels)["sam2_backbone_out"]
@@ -85,9 +80,17 @@ def point_forward(model, processor, image, point_xy, *, freeze_encoder):
     _, vision, _, sizes = tracker._prepare_backbone_features(features)
     vision[-1] = vision[-1] + tracker.no_mem_embed
     maps = [feat.permute(1, 2, 0).reshape(1, -1, *size) for feat, size in zip(vision, sizes)]
-    point = torch.as_tensor(point_xy, device=pixels.device, dtype=torch.float32).reshape(1, 1, 2)
-    point = predictor._transforms.transform_coords(point, normalize=True, orig_hw=image.shape[:2])
-    labels = torch.ones((1, 1), dtype=torch.int64, device=pixels.device)
+    return maps
+
+
+def decode_point(model, maps, point_xy, original_shape):
+    """Decode an independent positive point using the current image's features."""
+    predictor = model.inst_interactive_predictor
+    tracker = predictor.model
+    decoder = tracker.sam_mask_decoder
+    point = torch.as_tensor(point_xy, device=maps[-1].device, dtype=torch.float32).reshape(1, 1, 2)
+    point = predictor._transforms.transform_coords(point, normalize=True, orig_hw=original_shape)
+    labels = torch.ones((1, 1), dtype=torch.int64, device=maps[-1].device)
     sparse, dense = tracker.sam_prompt_encoder(points=(point, labels), boxes=None, masks=None)
     logits, scores, _, _ = decoder(
         image_embeddings=maps[-1],
@@ -99,9 +102,15 @@ def point_forward(model, processor, image, point_xy, *, freeze_encoder):
         high_res_features=maps[:-1],
     )
     logits = F.interpolate(
-        logits.float(), size=image.shape[:2], mode="bilinear", align_corners=False
+        logits.float(), size=original_shape, mode="bilinear", align_corners=False
     )
     return logits[0], scores[0].float()
+
+
+def point_forward(model, processor, image, point_xy, *, freeze_encoder):
+    """One image and point, with gradients through the requested model scope."""
+    maps = encode_point_image(model, processor, image, freeze_encoder=freeze_encoder)
+    return decode_point(model, maps, point_xy, image.shape[:2])
 
 
 def gradient_probes(model, scope):
@@ -188,6 +197,18 @@ class PointSegmenter:
                 point,
                 freeze_encoder=self.scope == "frozen_encoder",
             )
+
+    def encode(self, image):
+        device_type = torch.device(self.processor.device).type
+        with torch.autocast(device_type, dtype=torch.bfloat16, enabled=device_type == "cuda"):
+            return encode_point_image(
+                self.model, self.processor, image, freeze_encoder=self.scope == "frozen_encoder"
+            )
+
+    def predict_encoded(self, maps, point, original_shape):
+        device_type = torch.device(self.processor.device).type
+        with torch.autocast(device_type, dtype=torch.bfloat16, enabled=device_type == "cuda"):
+            return decode_point(self.model, maps, point, original_shape)
 
     def train(self, training=True):
         train_mode(self.model, self.scope, training)

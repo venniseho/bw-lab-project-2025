@@ -1,8 +1,8 @@
 # Online Weights & Biases on Vulcan
 
-Use project `bwlab-point-finetuning`. An **entity** is the personal/team workspace
+Use project `SAM-finetuning`. An **entity** is the personal/team workspace
 that owns a project; it is the first part of its URL:
-`https://wandb.ai/ENTITY/bwlab-point-finetuning`. It may differ from your username.
+`https://wandb.ai/ENTITY/SAM-finetuning`. It may differ from your username.
 The project can be created by the first successful upload if you have permission.
 
 ## Authenticate and upload the completed smoke run
@@ -22,15 +22,15 @@ your account so batch jobs can authenticate without an interactive prompt.
 Set the workspace name using the workspace shown in your W&B browser URL:
 
 ```bash
-export WANDB_ENTITY="YOUR_WANDB_WORKSPACE"
-export WANDB_PROJECT=bwlab-point-finetuning
+export WANDB_ENTITY="venniseho14-university-of-toronto"
+export WANDB_PROJECT=SAM-finetuning
 export WANDB_MODE=online
 
 wandb sync --entity "$WANDB_ENTITY" --project "$WANDB_PROJECT" \
   /scratch/vho/sam3-whole-scene/point-training.DAHWRv/smoke/wandb/offline-run-20261105_104022-3y9dst31
 ```
 
-Replace `YOUR_WANDB_WORKSPACE` before running. `wandb sync` prints a link to the
+Change the entity if using a different workspace. `wandb sync` prints a link to the
 uploaded run. Existing smoke logs retain their original metric names/axes and
 contain only what that run originally logged; new image logging is not retroactive.
 
@@ -63,12 +63,17 @@ branches while a job still uses that checkout.
 
 * Training loss, focal/Dice/quality components, selected-mask IoU and gradient norm,
   plotted against actual optimizer step (`train/step`).
-* Held-out mean IoU **and loss**, instance count and epoch. Epoch 0 is the
+* Held-out mean IoU **and loss**, instance count, epoch and global training step.
+  Curves use `heldout/step` so multiple interval checks in one epoch remain distinct.
+  Optional full-set checks are separate under `heldout_full`. Epoch 0 is the
   pre-training baseline; a max-steps smoke run can stop during its first epoch.
-* Up to four held-out before/after contact sheets per evaluation epoch, under
+* Up to four held-out before/after contact sheets per evaluation check, under
   `examples`. Their captions identify the target and before/after IoU.
 * Native/checkpoint/data configuration, trainable parameter counts and precision.
 * Final optimizer-step count, measured run duration and peak Torch-allocated VRAM.
+* Training/validation phase timings and throughput under `timing/*`, also saved
+  locally as CSV/JSONL. Per-object CSVs retain source IDs, prompts, transform settings,
+  losses and candidate scores/IoUs; validation rows retain selected-mask RLE.
 * W&B's sampled GPU/CPU/RAM system metrics where supported by the compute node.
 
 Runs from the same output parent are grouped together; `job_type` identifies

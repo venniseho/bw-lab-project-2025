@@ -1,6 +1,7 @@
 """Persist training logs and figures; tracking is supplied by the experiment."""
 
 import json
+import csv
 from core.visualization import training_contact_sheet
 
 
@@ -12,12 +13,37 @@ class TrainingOutput:
     def record(self, channel, record):
         with (self.path / f"{channel}.jsonl").open("a") as stream:
             stream.write(json.dumps(record, allow_nan=False) + "\n")
-        if channel in ("train", "summary", "timing"):
+        if channel in (
+            "train",
+            "heldout",
+            "timing",
+            "summary",
+            "checkpoints",
+            "benchmark",
+            "benchmark_samples",
+        ):
+            csv_path = self.path / f"{channel}.csv"
+            fresh = not csv_path.exists()
+            with csv_path.open("a", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=list(record))
+                if fresh:
+                    writer.writeheader()
+                writer.writerow(record)
+        if channel in ("train", "summary", "timing", "benchmark"):
             print(json.dumps(record), flush=True)
-        if self.tracking and channel == "timing":
+        if self.tracking and channel == "benchmark":
             self.tracking.log(
                 {
-                    f"timing/{record['phase']}/{key}": value
+                    f"benchmark/{record['mode']}/{key}": value
+                    for key, value in record.items()
+                    if isinstance(value, (int, float))
+                }
+            )
+        if self.tracking and channel == "timing":
+            phase = "validation_full" if record.get("validation_set") == "full" else record["phase"]
+            self.tracking.log(
+                {
+                    f"timing/{phase}/{key}": value
                     for key, value in record.items()
                     if isinstance(value, (int, float))
                 }
@@ -30,12 +56,14 @@ class TrainingOutput:
             }
             self.tracking.log(metrics)
         if self.tracking and channel == "summary":
+            prefix = "heldout_full" if record.get("validation_set") == "full" else "heldout"
             self.tracking.log(
                 {
-                    "heldout/mean_iou": record["mean_iou"],
-                    "heldout/mean_loss": record["mean_loss"],
-                    "heldout/instances": record["instances"],
-                    "heldout/epoch": record["epoch"],
+                    f"{prefix}/mean_iou": record["mean_iou"],
+                    f"{prefix}/mean_loss": record["mean_loss"],
+                    f"{prefix}/instances": record["instances"],
+                    f"{prefix}/epoch": record["epoch"],
+                    f"{prefix}/step": record.get("step", 0),
                 }
             )
 
@@ -51,18 +79,25 @@ class TrainingOutput:
                 }
             )
 
-    def preview(self, sample, point, before, after, epoch, index):
-        path = self.path / "previews" / f"epoch-{epoch}-{index}.png"
+    def preview(
+        self, sample, point, before, after, epoch, index, step=None, validation_set="interval"
+    ):
+        suffix = "" if step is None else f"-step-{step}"
+        if validation_set == "full":
+            suffix += "-full"
+        path = self.path / "previews" / f"epoch-{epoch}{suffix}-{index}.png"
         training_contact_sheet(path, sample, point, before, after)
         if self.tracking and self.image_factory:
+            prefix = "examples_full" if validation_set == "full" else "examples"
             caption = (
                 f"{sample['__key__']}: target-point prompt; "
                 f"IoU before={before['iou']:.3f}, after={after['iou']:.3f}"
             )
             self.tracking.log(
                 {
-                    "examples/epoch": epoch,
-                    f"examples/instance_{index}": self.image_factory(str(path), caption=caption),
+                    f"{prefix}/epoch": epoch,
+                    f"{prefix}/step": step or 0,
+                    f"{prefix}/instance_{index}": self.image_factory(str(path), caption=caption),
                 }
             )
 

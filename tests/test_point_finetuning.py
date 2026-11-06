@@ -188,7 +188,7 @@ class PointTrainingTests(unittest.TestCase):
                     [row["phase"] for row in timings], ["validation", "train", "validation"]
                 )
                 self.assertEqual([row["instances"] for row in timings], [1, 1, 1])
-                self.assertTrue((output / "previews/epoch-1-0.png").is_file())
+                self.assertTrue((output / "previews/epoch-1-step-1-0.png").is_file())
                 self.assertTrue((output / "complete.json").is_file())
                 state = torch.load(output / "checkpoint.pt", weights_only=True)
                 restored, _ = tiny_model()
