@@ -2,6 +2,7 @@
 
 import csv
 import json
+import random
 from pathlib import Path
 import tempfile
 import sys
@@ -145,9 +146,17 @@ class PointExperimentTests(unittest.TestCase):
 
     def test_full_split_selects_one_noncrowd_mask_per_eligible_source_reproducibly(self):
         data = {
-            "images": [{"id": i, "file_name": f"{i}.jpg"} for i in range(4)],
+            "images": [
+                {"id": i, "file_name": f"{i}.jpg", "width": 8, "height": 8} for i in range(4)
+            ],
             "annotations": [
-                {"id": i * 10 + j, "image_id": i, "iscrowd": int(i == 3)}
+                {
+                    "id": i * 10 + j,
+                    "image_id": i,
+                    "iscrowd": int(i == 3),
+                    "category_id": 1,
+                    "segmentation": [[1, 1, 5, 1, 5, 5, 1, 5]],
+                }
                 for i in range(4)
                 for j in range(3)
             ],
@@ -159,6 +168,55 @@ class PointExperimentTests(unittest.TestCase):
         self.assertEqual({a["image_id"] for a in split["annotations"]}, {0, 1, 2})
         self.assertEqual(split, select_official_split(data, 0, 42))
         self.assertEqual(len(data["annotations"]), 12)
+
+    def test_empty_target_is_replaced_and_images_without_valid_targets_are_audited(self):
+        valid = [[1, 1, 5, 1, 5, 5, 1, 5]]
+        empty = [[20, 20, 21, 20, 21, 21]]
+        annotations = [
+            {
+                "id": ann_id,
+                "image_id": image_id,
+                "category_id": 1,
+                "iscrowd": crowd,
+                "segmentation": segmentation,
+            }
+            for ann_id, image_id, crowd, segmentation in (
+                (1816247, 1, 0, empty),
+                (1816248, 1, 0, valid),
+                (20, 2, 0, empty),
+                (30, 3, 1, valid),
+                (40, 4, 0, valid),
+            )
+        ]
+        data = {
+            "images": [
+                {"id": i, "width": 8, "height": 8, "file_name": f"{i}.jpg"} for i in (1, 2, 3, 4)
+            ],
+            "annotations": annotations,
+            "categories": [{"id": 1, "name": "object"}],
+        }
+        seed = next(
+            seed
+            for seed in range(100)
+            if random.Random(f"{seed}:1").choice([1816247, 1816248]) == 1816247
+        )
+        result = select_official_split(data, 0, seed)
+        self.assertEqual([image["id"] for image in result["images"]], [1, 4])
+        self.assertEqual([ann["id"] for ann in result["annotations"]], [1816248, 40])
+        self.assertEqual(result["selection_counts"]["replacement_target_images"], 1)
+        self.assertEqual(result["selection_counts"]["excluded_without_valid_mask"], 1)
+        self.assertEqual(result["selection_counts"]["excluded_without_noncrowd_target"], 1)
+        self.assertTrue(
+            any(
+                row["annotation_id"] == 1816247 and row["reason"] == "empty_mask"
+                for row in result["selection_audit"]
+            )
+        )
+        self.assertEqual(result, select_official_split(data, 0, seed))
+        self.assertEqual(len(select_official_split(data, 2, seed)["images"]), 2)
+        with self.assertRaisesRegex(ValueError, "only 2"):
+            select_official_split(data, 3, seed)
+        self.assertEqual(len(data["annotations"]), 5)
 
     def test_loader_uses_one_mask_per_image_even_with_old_all_instance_annotations(self):
         with tempfile.TemporaryDirectory() as folder:

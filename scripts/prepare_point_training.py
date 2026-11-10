@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.models.sam3 import VERIFIED_SAM3_API_REVISION
 from core.data_loading.download import ensure_annotations
-from core.data_loading.splits import select_splits, validate_masks
+from core.data_loading.splits import select_splits
 from core.data_loading.download import BASE, download
 from core.data_loading.point_preparation import select_official_split
 
@@ -73,7 +73,6 @@ def _prepare_splits(args, root):
     for name, split in splits.items():
         label = "validation" if name == "test" else name
         source_split = "val2017" if args.official_splits and name == "test" else "train2017"
-        validate_masks(split)
         for image in split["images"]:
             filename = image["file_name"]
             if Path(filename).name != filename or not filename.endswith(".jpg"):
@@ -163,6 +162,16 @@ def main():
         (output / f"{filename}.json").write_text(json.dumps(split) + "\n")
     config = _config(args, native, output, revision, splits)
     (output / "config.json").write_text(json.dumps(config, indent=2) + "\n")
+    with (output / "selection_issues.csv").open("w", newline="") as stream:
+        writer = csv.DictWriter(
+            stream, fieldnames=["split", "image_id", "annotation_id", "action", "reason"]
+        )
+        writer.writeheader()
+        for name, split in splits.items():
+            writer.writerows(
+                {"split": "validation" if name == "test" else name, **row}
+                for row in split["selection_audit"]
+            )
     with (output / "samples.csv").open("w", newline="") as stream:
         writer = csv.DictWriter(
             stream,
@@ -188,6 +197,7 @@ def main():
         print(
             f"{label}: {len(split['images'])} images, {len(split['annotations'])} masks", flush=True
         )
+        print(f"{label} selection: {json.dumps(split['selection_counts'])}", flush=True)
     print("Preparation only; no model forward or training launched.", flush=True)
 
 

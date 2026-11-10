@@ -29,7 +29,11 @@ starting value is 12 original-image pixels, spacing 40, angle 90 degrees.
 
 New preparation selects one random noncrowd annotation per image. Thus training
 steps equal eligible training images at batch size 1, rather than total objects.
-Images without a noncrowd target are excluded and counted explicitly. A fixed
+Selected masks are decoded during preparation. If a seeded target is empty,
+malformed or misaligned, another noncrowd target in that image is tried in seeded
+order. Images without any usable target are excluded and counted explicitly.
+Valid previous first choices stay unchanged. `selection_issues.csv` records rejected
+annotation IDs, replacement IDs, excluded images and reasons. A fixed
 random target and foreground click are used throughout the run for reproducible
 comparisons. A fence click is selected on visible target support; if none remains,
 it falls back to original target support and records that it is not visible.
