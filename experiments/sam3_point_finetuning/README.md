@@ -46,6 +46,10 @@ results, not a new blind test set. The earlier exploratory val2017 work still
 exists. Without that flag, small disjoint train2017 subsets remain available.
 Only missing JPEGs are downloaded and cached on Vulcan scratch. Transformations
 run in RAM in CPU loader workers; transformed JPEGs are not precomputed.
+Downloads retry transient connection failures and selected HTTP errors up to six
+times, with short exponential waits. Partial files are discarded; a supplied
+Content-Length is checked before publishing the cache. Existing completed files
+are reused. Exhausted retries still stop preparation with the underlying error.
 
 `--validation-image-count N` fixes a seeded image subset for baseline and interval
 checks. Without it, every prepared validation image is evaluated. If a subset is
