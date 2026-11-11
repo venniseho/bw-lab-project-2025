@@ -28,9 +28,11 @@ class PhaseTiming:
         """Pause phase accounting for interval validation and checkpoint I/O."""
         self._synchronize()
         start = time.perf_counter()
-        operation()
-        self._synchronize()
-        self.excluded_seconds += time.perf_counter() - start
+        try:
+            operation()
+        finally:
+            self._synchronize()
+            self.excluded_seconds += time.perf_counter() - start
 
     def finish(self):
         self._synchronize()

@@ -14,6 +14,7 @@ from core.data_loading.download import ensure_annotations
 from core.data_loading.splits import select_splits
 from core.data_loading.download import BASE, download
 from core.data_loading.point_preparation import select_official_split
+from core.data_loading.download_ahead import cached_first_order
 
 
 def _parse_args(argv=None):
@@ -30,6 +31,12 @@ def _parse_args(argv=None):
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--download", action="store_true")
+    parser.add_argument(
+        "--download-ahead",
+        action="store_true",
+        help="Use cached training images first while an existing downloader fills the cache",
+    )
+    parser.add_argument("--checkpoint-interval-steps", type=int, default=1000)
     parser.add_argument(
         "--official-splits",
         action="store_true",
@@ -78,10 +85,11 @@ def _prepare_splits(args, root):
             if Path(filename).name != filename or not filename.endswith(".jpg"):
                 raise ValueError(f"Unexpected COCO filename: {filename}")
             path = root / source_split / filename
-            if args.download:
+            deferred = getattr(args, "download_ahead", False) and name == "train"
+            if args.download and not deferred:
                 print(f"{label}: caching {filename}", flush=True)
                 download(f"{BASE}/{source_split}/{filename}", path)
-            if not path.is_file():
+            if not path.is_file() and not deferred:
                 raise FileNotFoundError(f"Missing {path}; add --download")
             image["file_name"] = str(path)
     return splits
@@ -111,6 +119,8 @@ def _config(args, native, output, revision, splits):
         "one_object_per_image": True,
         "resolution": 1008,
         "validation_interval_steps": args.validation_interval_steps,
+        "checkpoint_interval_steps": args.checkpoint_interval_steps,
+        "download_ahead": args.download_ahead,
         "validation_image_count": args.validation_image_count,
         "transform": args.transform,
         "transform_parameters": {
@@ -155,12 +165,21 @@ def main():
         parser.error("Validation interval must be positive")
     if args.validation_image_count is not None and args.validation_image_count < 1:
         parser.error("Validation subset must be positive")
+    if args.checkpoint_interval_steps < 1:
+        parser.error("Checkpoint interval must be positive")
     splits = _prepare_splits(args, root)
     output.mkdir(parents=True)
     for name, split in splits.items():
         filename = "validation" if name == "test" else name
         (output / f"{filename}.json").write_text(json.dumps(split) + "\n")
     config = _config(args, native, output, revision, splits)
+    if args.download_ahead:
+        order, ready = cached_first_order(splits["train"]["images"], args.seed)
+        if not ready:
+            raise ValueError("No training images cached yet; let the downloader build a buffer")
+        config["training_order"] = order
+        config["cached_training_images_at_preparation"] = ready
+        print(f"Cached-first buffer: {ready}/{len(order)} training images ready", flush=True)
     (output / "config.json").write_text(json.dumps(config, indent=2) + "\n")
     with (output / "selection_issues.csv").open("w", newline="") as stream:
         writer = csv.DictWriter(

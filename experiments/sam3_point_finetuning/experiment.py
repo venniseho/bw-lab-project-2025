@@ -20,6 +20,8 @@ from core.tasks.point_segmentation import forward_sample
 from core.trainer import PointTrainer
 from core.training_output import TrainingOutput
 from core.stimuli.point_transforms import PointTransform
+from core.data_loading.download_ahead import DownloadReadyDataset
+from core.training_resume import shutdown_signals
 
 
 def validate_config(config, max_steps):
@@ -30,6 +32,8 @@ def validate_config(config, max_steps):
         raise ValueError("max_steps must be positive")
     if config["epochs"] < 1 or config["workers"] < 0:
         raise ValueError("Positive epochs and nonnegative workers required")
+    if config.get("checkpoint_interval_steps", 1000) < 1:
+        raise ValueError("Checkpoint interval must be positive")
     if config["transform"] not in ("identity", "fence", "fragmentation"):
         raise ValueError("Unknown point-prompt transform")
     if config.get("resolution", 1008) != 1008:
@@ -113,7 +117,7 @@ def build_output(path, metadata, wandb_mode):
     return output
 
 
-def run(config, scope, output, wandb_mode="online", max_steps=None):
+def run(config, scope, output, wandb_mode="online", max_steps=None, resume=None):
     """Construct dependencies once; the trainer owns the training loop."""
     validate_config(config, max_steps)
     path = Path(output)
@@ -121,6 +125,20 @@ def run(config, scope, output, wandb_mode="online", max_steps=None):
     (path / "previews").mkdir()
     seed_everything(config["seed"])
     train, heldout = build_data(config)
+    if config.get("download_ahead"):
+        train = DownloadReadyDataset(train)
+    if resume and "training_order" not in config:
+        raise ValueError(
+            "Resume needs an explicit saved training order; prepare a new download-ahead run"
+        )
+    order = None
+    if "training_order" in config:
+        by_image = {record["image_id"]: index for index, record in enumerate(train.records)}
+        if len(config["training_order"]) != len(train) or set(config["training_order"]) != set(
+            by_image
+        ):
+            raise ValueError("Saved training order does not match the prepared dataset")
+        order = [by_image[image_id] for image_id in config["training_order"]]
     model, processor, provenance = load_scene_model(config["checkpoint"], None, torch)
     segmenter = PointSegmenter(model, processor, scope)
     parameters = [p for p in model.parameters() if p.requires_grad]
@@ -136,6 +154,7 @@ def run(config, scope, output, wandb_mode="online", max_steps=None):
         "gpu": torch.cuda.get_device_name(),
         "precision": "bf16 forward, float32 loss/parameters",
         "max_steps": max_steps,
+        "resumed_from": str(resume) if resume else None,
         "point_policy": "uniform_foreground_fixed_per_instance",
         "dataset_counts": {
             name: {
@@ -164,18 +183,32 @@ def run(config, scope, output, wandb_mode="online", max_steps=None):
     )
     exit_code = 1
     try:
+        if resume:
+            trainer.resume(resume, config)
         final_validation = None
         if config.get("validation_image_count") and config.get("full_validation_at_end", True):
             _, final_validation = build_data({**config, "validation_image_count": None})
-        result = trainer.fit(
-            loader(train, config["workers"], shuffle=True, seed=config["seed"]),
-            loader(heldout, config["workers"]),
-            config,
-            max_steps,
-            final_validation_data=loader(final_validation, config["workers"])
-            if final_validation is not None
-            else None,
-        )
+        with shutdown_signals(trainer):
+            result = trainer.fit(
+                loader(train, config["workers"], shuffle=True, seed=config["seed"]),
+                loader(heldout, config["workers"]),
+                config,
+                max_steps,
+                final_validation_data=loader(final_validation, config["workers"])
+                if final_validation is not None
+                else None,
+                train_loader_factory=(
+                    lambda epoch, cursor: loader(
+                        train,
+                        config["workers"],
+                        order=order,
+                        start=cursor,
+                        seed=config["seed"] + epoch,
+                    )
+                )
+                if order is not None
+                else None,
+            )
         exit_code = 0
         return result
     finally:
@@ -193,6 +226,7 @@ def main():
         default=os.environ.get("WANDB_MODE", "online"),
     )
     parser.add_argument("--max-steps", type=int)
+    parser.add_argument("--resume", type=Path)
     args = parser.parse_args()
     run(
         json.loads(args.config.read_text()),
@@ -200,6 +234,7 @@ def main():
         args.output,
         args.wandb_mode,
         args.max_steps,
+        args.resume,
     )
 
 

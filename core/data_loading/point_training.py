@@ -6,7 +6,7 @@ import random
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 from core.data_loading.coco_manifest import CocoManifestDataset
 
@@ -52,7 +52,14 @@ def single_sample(batch):
     return batch[0]
 
 
-def loader(samples, workers, *, shuffle=False, seed=42):
+def loader(samples, workers, *, shuffle=False, seed=42, order=None, start=0):
+    if order is not None:
+        if sorted(order) != list(range(len(samples))):
+            raise ValueError("Training order must visit every sample exactly once")
+        if not 0 <= start <= len(samples):
+            raise ValueError("Invalid resume cursor")
+        samples = Subset(samples, order[start:])
+        shuffle = False
     return DataLoader(
         samples,
         batch_size=1,

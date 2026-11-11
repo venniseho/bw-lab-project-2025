@@ -153,8 +153,10 @@ Checkpoints remain on scratch and are not automatically uploaded to W&B. To reus
 one, initialize the same native model from the original checkpoint, then load
 `torch.load(path, map_location='cpu', weights_only=True)['model']` with
 `model.load_state_dict(..., strict=True)`. This is BWLab checkpoint format, not
-Meta's checkpoint-prefix format. Exact interrupted-run resume is not implemented;
-the weights can be reused for evaluation or a new training experiment.
+Meta's checkpoint-prefix format. New runs prepared with `--download-ahead` also
+save sample order, completed-sample cursor, optimizer and random states for
+`--resume`. Older checkpoints remain usable as weights, but cannot resume the
+sample sequence. See [starting before downloads finish](../../docs/download_ahead_training.md).
 
 ## Loss
 

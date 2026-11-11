@@ -2,6 +2,7 @@
 
 import time
 import shutil
+import math
 from typing import Protocol
 
 import numpy as np
@@ -9,6 +10,12 @@ import torch
 
 from core.training_timing import PhaseTiming
 from core.point_records import sample_record, mask_rle
+from core.training_resume import (
+    TrainingInterrupted,
+    random_state,
+    restore_random_state,
+    check_resume_config,
+)
 
 
 class TrainableSegmenter(Protocol):
@@ -23,7 +30,7 @@ class TrainableSegmenter(Protocol):
     def check_update(self, probes): ...
 
 
-def checkpoint(model, optimizer, output, epoch, config, scope, step=0):
+def checkpoint(model, optimizer, output, epoch, config, scope, step=0, training_state=None):
     path = output / "checkpoint.pt"
     temporary = output / "checkpoint.part"
     torch.save(
@@ -35,6 +42,7 @@ def checkpoint(model, optimizer, output, epoch, config, scope, step=0):
             "config": config,
             "scope": scope,
             "step": step,
+            "training_state": training_state,
         },
         temporary,
     )
@@ -58,6 +66,37 @@ class PointTrainer:
         self.last_summary = None
         self.last_validation_step = None
         self.latest_checkpoint = None
+        self.epoch = 1
+        self.epoch_step = 0
+        self.stop_reason = None
+        self.resumed = False
+        self.best_checkpoint = None
+
+    def check_stop(self):
+        if self.stop_reason:
+            raise TrainingInterrupted(f"Checkpoint requested by {self.stop_reason}")
+
+    def resume(self, path, config):
+        saved = torch.load(path, map_location="cpu", weights_only=True)
+        state = saved.get("training_state")
+        if not state or state.get("version") != 1:
+            raise ValueError(
+                "Checkpoint lacks a saved sample cursor and random state; cannot resume"
+            )
+        if saved["scope"] != self.segmenter.scope:
+            raise ValueError("Checkpoint training scope differs")
+        check_resume_config(saved["config"], config)
+        self.segmenter.model.load_state_dict(saved["model"])
+        self.optimizer.load_state_dict(saved["optimizer"])
+        self.steps = saved["step"]
+        self.epoch, self.epoch_step = state["epoch"], state["epoch_step"]
+        self.audit = state["audit"]
+        self.best_iou = state["best_iou"]
+        self.best_checkpoint = state["best_checkpoint"]
+        self.last_summary = state["last_summary"]
+        self.last_validation_step = state["last_validation_step"]
+        restore_random_state(state["random"])
+        self.resumed = True
 
     def train_step(self, sample, epoch):
         start = time.perf_counter()
@@ -69,10 +108,11 @@ class PointTrainer:
         probes = self.segmenter.gradient_probes() if self.steps == 0 else None
         norm = torch.nn.utils.clip_grad_norm_(self.parameters, 1.0, error_if_nonfinite=True)
         self.optimizer.step()
+        self.steps += 1
+        self.epoch_step += 1
         if probes is not None:
             self.audit = self.segmenter.check_update(probes)
             self.output.save_json("audit", self.audit)
-        self.steps += 1
         self.output.record(
             "train",
             {
@@ -91,16 +131,20 @@ class PointTrainer:
     ):
         self.segmenter.train(True)
         timing = PhaseTiming(self.segmenter.model, "train", epoch)
-        for sample in samples:
-            self.train_step(sample, epoch)
-            timing.observe(sample)
-            if after_step is not None and self.steps % validation_interval == 0:
-                timing.exclude(after_step)
-            if max_steps is not None and self.steps >= max_steps:
-                break
-        report = timing.finish()
-        report["step"] = self.steps
-        self.output.record("timing", report)
+        try:
+            for sample in samples:
+                self.check_stop()
+                self.train_step(sample, epoch)
+                timing.observe(sample)
+                self.check_stop()
+                if after_step is not None and self.steps % validation_interval == 0:
+                    timing.exclude(after_step)
+                if max_steps is not None and self.steps >= max_steps:
+                    break
+        finally:
+            report = timing.finish()
+            report["step"] = self.steps
+            self.output.record("timing", report)
 
     @torch.no_grad()
     def evaluate(self, samples, epoch, baseline=None, validation_set="interval"):
@@ -109,6 +153,7 @@ class PointTrainer:
         rows, examples = [], {}
         cached_image, cached_features, encoder_forwards = None, None, 0
         for index, sample in enumerate(samples):
+            self.check_stop()
             if cached_image is None or not np.array_equal(cached_image, sample["image"]):
                 cached_features = self.segmenter.encode(sample["image"])
                 cached_image = sample["image"]
@@ -168,6 +213,15 @@ class PointTrainer:
 
     def save_checkpoint(self, config, epoch):
         start = time.perf_counter()
+        current_summary = self.last_summary if self.last_validation_step == self.steps else None
+        improved = (
+            current_summary is not None
+            and current_summary["validation_set"] == "interval"
+            and current_summary["mean_iou"] > self.best_iou
+        )
+        if improved:
+            self.best_iou = current_summary["mean_iou"]
+            self.best_checkpoint = str(self.output.path / "checkpoint-best.pt")
         saved = checkpoint(
             self.segmenter.model,
             self.optimizer,
@@ -176,12 +230,19 @@ class PointTrainer:
             config,
             self.segmenter.scope,
             self.steps,
+            training_state={
+                "version": 1,
+                "epoch": self.epoch,
+                "epoch_step": self.epoch_step,
+                "random": random_state(),
+                "audit": self.audit,
+                "best_iou": self.best_iou,
+                "best_checkpoint": self.best_checkpoint,
+                "last_summary": self.last_summary,
+                "last_validation_step": self.last_validation_step,
+            },
         )
-        if (
-            self.last_summary["validation_set"] == "interval"
-            and self.last_summary["mean_iou"] > self.best_iou
-        ):
-            self.best_iou = self.last_summary["mean_iou"]
+        if improved:
             destination = self.output.path / "checkpoint-best.part"
             shutil.copyfile(saved["path"], destination)
             destination.replace(self.output.path / "checkpoint-best.pt")
@@ -190,30 +251,104 @@ class PointTrainer:
             {
                 **saved,
                 "wall_seconds": time.perf_counter() - start,
-                "validation_mean_iou": self.last_summary["mean_iou"],
+                "validation_mean_iou": current_summary["mean_iou"] if current_summary else None,
             },
         )
         self.latest_checkpoint = saved
         return saved
 
-    def fit(self, train_data, heldout_data, config, max_steps=None, final_validation_data=None):
+    def fit(
+        self,
+        train_data,
+        heldout_data,
+        config,
+        max_steps=None,
+        final_validation_data=None,
+        train_loader_factory=None,
+    ):
+        try:
+            return self._fit(
+                train_data,
+                heldout_data,
+                config,
+                max_steps,
+                final_validation_data,
+                train_loader_factory,
+            )
+        except BaseException as error:
+            # Preserve the previous atomic checkpoint even if emergency saving fails.
+            try:
+                saved = self.latest_checkpoint
+                if saved is None or saved["step"] != self.steps:
+                    saved = self.save_checkpoint(config, self.epoch)
+                self.output.save_json(
+                    "interrupted",
+                    {
+                        "reason": str(error),
+                        "step": self.steps,
+                        "checkpoint": saved,
+                        "epoch": self.epoch,
+                        "epoch_step": self.epoch_step,
+                    },
+                )
+                print(
+                    f"Stopped at update {self.steps}; resume checkpoint: {saved['path']}",
+                    flush=True,
+                )
+            except BaseException as save_error:
+                print(
+                    f"Emergency checkpoint failed: {save_error}; retain previous checkpoint",
+                    flush=True,
+                )
+            raise
+
+    def _fit(
+        self,
+        train_data,
+        heldout_data,
+        config,
+        max_steps,
+        final_validation_data,
+        train_loader_factory,
+    ):
         start = time.perf_counter()
-        baseline = self.evaluate(heldout_data, 0)
-        self.save_checkpoint(config, 0)
+        baseline = None
+        if not self.resumed:
+            baseline = self.evaluate(heldout_data, 0)
+            self.save_checkpoint(config, 0)
         full_baseline = None
-        if final_validation_data is not None:
+        if final_validation_data is not None and not self.resumed:
             full_baseline = self.evaluate(final_validation_data, 0, validation_set="full")
         interval = config.get("validation_interval_steps")
-        for epoch in range(1, config["epochs"] + 1):
+        if (
+            self.resumed
+            and interval
+            and self.steps % interval == 0
+            and self.last_validation_step != self.steps
+        ):
+            self.evaluate(heldout_data, self.epoch)
+            self.save_checkpoint(config, self.epoch)
+        for epoch in range(self.epoch, config["epochs"] + 1):
+            self.epoch = epoch
 
             def periodic_validation():
                 if interval and self.steps % interval == 0:
                     self.evaluate(heldout_data, epoch, baseline)
                     self.save_checkpoint(config, epoch)
                     self.segmenter.train(True)
+                elif self.steps % config.get("checkpoint_interval_steps", 1000) == 0:
+                    self.save_checkpoint(config, epoch)
+                self.check_stop()
 
+            samples = (
+                train_loader_factory(epoch, self.epoch_step) if train_loader_factory else train_data
+            )
             self.train_epoch(
-                train_data, epoch, max_steps, periodic_validation if interval else None, interval
+                samples,
+                epoch,
+                max_steps,
+                periodic_validation,
+                math.gcd(interval or 0, config.get("checkpoint_interval_steps", 1000)),
             )
             if self.last_validation_step != self.steps:
                 self.evaluate(heldout_data, epoch, baseline)
@@ -222,6 +357,7 @@ class PointTrainer:
                 saved = self.save_checkpoint(config, epoch)
             if max_steps is not None and self.steps >= max_steps:
                 break
+            self.epoch, self.epoch_step = epoch + 1, 0
         if final_validation_data is not None:
             self.evaluate(
                 final_validation_data, epoch, baseline=full_baseline, validation_set="full"
@@ -229,7 +365,7 @@ class PointTrainer:
         summary = {
             "steps": self.steps,
             "checkpoint": saved,
-            "best_checkpoint": str(self.output.path / "checkpoint-best.pt"),
+            "best_checkpoint": self.best_checkpoint,
             "best_interval_validation_iou": self.best_iou,
             "final_validation_summary": self.last_summary,
             "gradient_and_step_audit": self.audit,

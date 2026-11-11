@@ -12,6 +12,7 @@ def sample_record(sample):
         "image_id": metadata.get("image_id"),
         "annotation_id": metadata.get("annotation_id"),
         "image_path": metadata.get("image_path"),
+        "cache_wait_seconds": metadata.get("cache_wait_seconds", 0.0),
         "image_height": sample["image"].shape[0],
         "image_width": sample["image"].shape[1],
         "target_pixels": int(np.count_nonzero(sample["segmentation"])),
