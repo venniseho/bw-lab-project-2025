@@ -3,7 +3,11 @@
 The active protocol is 1008x1008 preprocessing, batch size 1, one seeded random
 noncrowd target per source image, and one training epoch. Full point-path training
 updates the shared vision encoder, point encoder and mask decoder. The frozen
-scope updates only the point encoder and mask decoder. Language/concept/video
+scope (`frozen_encoder`) updates only the point encoder and mask decoder.
+The stricter `mask_decoder_only` scope freezes both encoders and updates only
+`sam_mask_decoder`, including its high-resolution feature projections and quality
+prediction head. The first-step audit rejects any gradients/trainable weights
+outside that decoder. Language/concept/video
 branches are unused. BF16 forward, float32 weights/loss, AdamW lr=1e-5 and weight
 decay=.01, gradient clipping=1.0. This is our small PyTorch loop using Meta's native
 interactive modules, not its concept-segmentation Trainer.

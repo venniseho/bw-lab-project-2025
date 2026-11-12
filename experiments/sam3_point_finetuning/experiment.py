@@ -218,7 +218,9 @@ def run(config, scope, output, wandb_mode="online", max_steps=None, resume=None)
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--scope", choices=("full", "frozen_encoder"), required=True)
+    parser.add_argument(
+        "--scope", choices=("full", "frozen_encoder", "mask_decoder_only"), required=True
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--wandb-mode",

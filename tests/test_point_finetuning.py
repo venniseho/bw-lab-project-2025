@@ -100,6 +100,20 @@ def tiny_model():
 
 
 class PointTrainingTests(unittest.TestCase):
+    def test_mask_decoder_only_keeps_both_encoders_in_eval_and_rejects_prompt_gradients(self):
+        model, processor = tiny_model()
+        segmenter = PointSegmenter(model, processor, "mask_decoder_only")
+        segmenter.train(True)
+        tracker = model.inst_interactive_predictor.model
+        self.assertFalse(model.backbone.vision_backbone.training)
+        self.assertFalse(tracker.sam_prompt_encoder.training)
+        self.assertTrue(tracker.sam_mask_decoder.training)
+        self.assertEqual(segmenter.parameter_counts["encoder"], 0)
+        self.assertEqual(segmenter.parameter_counts["prompt_encoder"], 0)
+        tracker.sam_prompt_encoder.embedding.requires_grad_(True)
+        with self.assertRaisesRegex(RuntimeError, "Non-mask-decoder parameter"):
+            gradient_probes(model, "mask_decoder_only")
+
     def test_phase_throughput_distinguishes_repeated_images_from_sources(self):
         model, _ = tiny_model()
         with patch("core.training_timing.time.perf_counter", side_effect=[100.0, 104.0]):
@@ -158,7 +172,7 @@ class PointTrainingTests(unittest.TestCase):
             random_target_point(np.zeros((2, 2)), "empty")
 
     def test_injected_trainer_runs_baseline_updates_preview_and_reloadable_checkpoint(self):
-        for scope in ("full", "frozen_encoder"):
+        for scope in ("full", "frozen_encoder", "mask_decoder_only"):
             with self.subTest(scope=scope), tempfile.TemporaryDirectory() as folder:
                 output = Path(folder)
                 (output / "previews").mkdir()
@@ -238,7 +252,7 @@ class PointTrainingTests(unittest.TestCase):
             foreground_point(np.zeros((2, 2)))
 
     def test_encoder_and_decoder_updates_follow_scope_and_projections_keep_gradients(self):
-        for scope in ("full", "frozen_encoder"):
+        for scope in ("full", "frozen_encoder", "mask_decoder_only"):
             with self.subTest(scope=scope):
                 model, processor = tiny_model()
                 set_scope(model, scope)
@@ -248,7 +262,7 @@ class PointTrainingTests(unittest.TestCase):
                 )
                 image = np.full((8, 8, 3), 100, dtype=np.uint8)
                 logits, scores = point_forward(
-                    model, processor, image, [2.0, 2.0], freeze_encoder=scope == "frozen_encoder"
+                    model, processor, image, [2.0, 2.0], freeze_encoder=scope != "full"
                 )
                 loss, _ = mask_loss(logits, scores, torch.ones(8, 8))
                 loss.backward()
@@ -259,6 +273,18 @@ class PointTrainingTests(unittest.TestCase):
                 audit = check_step(probes)
                 self.assertIn("decoder", audit)
                 self.assertEqual("encoder" in audit, scope == "full")
+                if scope == "mask_decoder_only":
+                    tracker = model.inst_interactive_predictor.model
+                    self.assertFalse(
+                        any(p.requires_grad for p in tracker.sam_prompt_encoder.parameters())
+                    )
+                    self.assertTrue(
+                        all(
+                            name.startswith("inst_interactive_predictor.model.sam_mask_decoder.")
+                            for name, parameter in model.named_parameters()
+                            if parameter.requires_grad
+                        )
+                    )
                 for name, p in model.named_parameters():
                     if not p.requires_grad:
                         self.assertTrue(torch.equal(p, before[name]), name)

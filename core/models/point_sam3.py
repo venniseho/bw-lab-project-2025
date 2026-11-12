@@ -12,10 +12,9 @@ from core.samples import foreground_point
 
 
 ENCODER = ("backbone.vision_backbone.trunk.", "backbone.vision_backbone.sam2_convs.")
-DECODER = (
-    "inst_interactive_predictor.model.sam_prompt_encoder.",
-    "inst_interactive_predictor.model.sam_mask_decoder.",
-)
+PROMPT_ENCODER = ("inst_interactive_predictor.model.sam_prompt_encoder.",)
+MASK_DECODER = ("inst_interactive_predictor.model.sam_mask_decoder.",)
+DECODER = PROMPT_ENCODER + MASK_DECODER
 
 
 def _autograd_mlp_forward(self, x):
@@ -37,9 +36,10 @@ def enable_encoder_autograd(model):
 
 def set_scope(model, scope):
     """The full scope is the active point path, excluding text/video heads."""
-    if scope not in ("full", "frozen_encoder"):
+    if scope not in ("full", "frozen_encoder", "mask_decoder_only"):
         raise ValueError(scope)
-    prefixes = DECODER + (ENCODER if scope == "full" else ())
+    prefixes = MASK_DECODER if scope == "mask_decoder_only" else DECODER
+    prefixes += ENCODER if scope == "full" else ()
     for name, parameter in model.named_parameters():
         parameter.requires_grad_(name.startswith(prefixes))
     groups = {
@@ -52,6 +52,8 @@ def set_scope(model, scope):
     }
     if not groups["decoder"] or (scope == "full" and not groups["encoder"]):
         raise RuntimeError(f"Installed SAM3 does not match the expected point modules: {groups}")
+    if scope == "mask_decoder_only":
+        groups["prompt_encoder"] = 0
     return groups
 
 
@@ -59,7 +61,7 @@ def train_mode(model, scope, training):
     # Leave unused language, detector and video modules in evaluation mode.
     model.eval()
     tracker = model.inst_interactive_predictor.model
-    tracker.sam_prompt_encoder.train(training)
+    tracker.sam_prompt_encoder.train(training and scope != "mask_decoder_only")
     tracker.sam_mask_decoder.train(training)
     model.backbone.training = training and scope == "full"
     model.backbone.vision_backbone.train(training and scope == "full")
@@ -116,6 +118,12 @@ def point_forward(model, processor, image, point_xy, *, freeze_encoder):
 def gradient_probes(model, scope):
     """Check actual nonzero gradients in each required part before the first step."""
     result = {}
+    if scope == "mask_decoder_only":
+        for name, parameter in model.named_parameters():
+            if not name.startswith(MASK_DECODER) and (
+                parameter.requires_grad or parameter.grad is not None
+            ):
+                raise RuntimeError(f"Non-mask-decoder parameter participates in backward: {name}")
     for group, prefix in (("encoder", ENCODER), ("decoder", DECODER)):
         parameters = [(name, p) for name, p in model.named_parameters() if name.startswith(prefix)]
         active = [
@@ -123,7 +131,7 @@ def gradient_probes(model, scope):
             for name, p in parameters
             if p.grad is not None and torch.count_nonzero(p.grad)
         ]
-        if group == "encoder" and scope == "frozen_encoder":
+        if group == "encoder" and scope != "full":
             if active or any(p.requires_grad or p.grad is not None for _, p in parameters):
                 raise RuntimeError("Frozen encoder unexpectedly participates in backward")
             continue
@@ -195,14 +203,14 @@ class PointSegmenter:
                 self.processor,
                 image,
                 point,
-                freeze_encoder=self.scope == "frozen_encoder",
+                freeze_encoder=self.scope != "full",
             )
 
     def encode(self, image):
         device_type = torch.device(self.processor.device).type
         with torch.autocast(device_type, dtype=torch.bfloat16, enabled=device_type == "cuda"):
             return encode_point_image(
-                self.model, self.processor, image, freeze_encoder=self.scope == "frozen_encoder"
+                self.model, self.processor, image, freeze_encoder=self.scope != "full"
             )
 
     def predict_encoded(self, maps, point, original_shape):
