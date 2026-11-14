@@ -58,6 +58,7 @@ def check_resume_config(saved, current):
         "transform_parameters",
         "resolution",
         "learning_rate",
+        "lr_schedule",
         "training_order",
         "epochs",
         "native_revision",

@@ -7,17 +7,21 @@
 #SBATCH --mem=16G
 #SBATCH --time=01:00:00
 set -euo pipefail
-[[ $# -ge 3 && $# -le 4 ]] || { echo 'Usage: script repo base-config output [full|visible|both]' >&2; exit 2; }
+[[ $# -ge 3 && $# -le 4 ]] || { echo 'Usage: script repo base-config output [full|visible|both|staged]' >&2; exit 2; }
 repo=$(realpath "$1")
 config=$(realpath "$2")
 output=$3
 region=${4:-full}
 extra=()
+if [[ "$region" == staged ]]; then
+  region=full
+  extra=(--compare-fence-losses --compare-learning-rates)
+fi
 if [[ "$region" == both ]]; then
   region=full
   extra=(--compare-fence-losses)
 fi
-[[ "$region" == full || "$region" == visible ]] || { echo 'Choose full, visible, or both' >&2; exit 2; }
+[[ "$region" == full || "$region" == visible ]] || { echo 'Choose full, visible, both, or staged' >&2; exit 2; }
 module load python/3.12.4
 module load opencv/4.12.0
 source /scratch/vho/sam3-whole-scene/train-env/bin/activate

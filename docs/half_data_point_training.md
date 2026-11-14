@@ -163,3 +163,58 @@ model checkpoints; they do not require another training epoch. They should use
 matched eligible targets when paired comparisons are intended. A clean-image
 training control and learning-rate warmup/cosine comparisons remain separate
 experiments; neither is added by this seven-run preparation.
+
+## Updated staged plan: eight runs, then three
+
+The `staged` preparation mode now creates all eleven configs in one CPU job.
+Stage 1 contains fragmentation and all three fence severities, each with either
+constant learning rate or warmup followed by cosine decay. Stage 2 contains only
+the three fences trained with visible-region loss, using the constant learning
+rate so they can be compared against the matching Stage 1 controls. All runs use
+the mask-decoder-only scope, half-data protocol, and original pretrained weights.
+
+The schedule uses the existing peak learning rate of 1e-5. It starts at 1e-6,
+warms up over the first 5% of the actual training update budget, then decays to
+1e-6 at the last update. These are configurable starting values, not tuned
+settings. Each update logs its actual learning rate to CSV/JSONL and W&B.
+The rate is computed from the completed-update counter and full training budget,
+so resuming continues the same schedule rather than restarting warmup. A smoke
+run's `max_steps` does not shorten the configured schedule horizon.
+
+```bash
+cd /project/aip-sven/vho/bw-lab-project-2025
+git pull --ff-only origin main
+PLAN_ROOT=$(mktemp -d /scratch/vho/sam3-whole-scene/point-staged.XXXXXX)
+BASE_CONFIG=/scratch/vho/sam3-whole-scene/fragmentation-ahead.SQFHHT/prepared/config.json
+PREP_ID=$(sbatch --parsable --output="$PLAN_ROOT/preparation-%j.out" \
+  scripts/vulcan_point_followup.sbatch "$PWD" "$BASE_CONFIG" \
+  "$PLAN_ROOT/prepared" staged)
+echo "Preparation job: $PREP_ID"
+echo "Keep this path: $PLAN_ROOT"
+```
+
+After successful preparation, submit **only Stage 1**:
+
+```bash
+cat "$PLAN_ROOT/prepared/sample_counts.csv"
+export WANDB_ENTITY=venniseho14-university-of-toronto
+export WANDB_PROJECT=SAM-finetuning
+export WANDB_MODE=online
+for CONDITION in fragmentation fence-low fence-medium fence-high \
+  fragmentation-warmup-cosine fence-low-warmup-cosine \
+  fence-medium-warmup-cosine fence-high-warmup-cosine; do
+  JOB=$(sbatch --parsable --time=24:00:00 \
+    --job-name="bwlab-half-$CONDITION" \
+    --output="$PLAN_ROOT/$CONDITION-%j.out" \
+    scripts/vulcan_point_training.sbatch "$PWD" \
+    "$PLAN_ROOT/prepared/$CONDITION/config.json" mask_decoder_only \
+    "$PLAN_ROOT/training-$CONDITION")
+  echo "$CONDITION: job=$JOB results=$PLAN_ROOT/training-$CONDITION"
+done
+```
+
+Once Stage 1 completes and its results have been checked, submit Stage 2 with the
+same loop using only `fence-low-visible-loss`, `fence-medium-visible-loss`, and
+`fence-high-visible-loss` as CONDITION values. Do not rerun the Stage 1 loop in
+the same output directories. Stage 2 is not automatically submitted by any of
+these commands. Clean-image training remains an additional control to plan.

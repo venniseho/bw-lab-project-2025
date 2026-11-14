@@ -22,6 +22,7 @@ from core.training_output import TrainingOutput
 from core.stimuli.point_transforms import PointTransform
 from core.data_loading.download_ahead import DownloadReadyDataset
 from core.training_resume import shutdown_signals
+from core.learning_rate import learning_rate_for_update
 
 
 def validate_config(config, max_steps):
@@ -36,6 +37,8 @@ def validate_config(config, max_steps):
         raise ValueError("Checkpoint interval must be positive")
     if config.get("loss_region", "full") not in ("full", "visible"):
         raise ValueError("Loss region must be full or visible")
+    total_updates = config["epochs"] * config["splits"]["train"]["instances"]
+    learning_rate_for_update(config["learning_rate"], 0, total_updates, config.get("lr_schedule"))
     if config.get("checkpoint_metric", "mean_iou") not in (
         "mean_iou",
         "mean_full_iou",

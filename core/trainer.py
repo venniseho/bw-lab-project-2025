@@ -10,6 +10,7 @@ import torch
 
 from core.training_timing import PhaseTiming
 from core.point_records import sample_record, mask_rle
+from core.learning_rate import learning_rate_for_update
 from core.training_resume import (
     TrainingInterrupted,
     random_state,
@@ -71,6 +72,9 @@ class PointTrainer:
         self.stop_reason = None
         self.resumed = False
         self.best_checkpoint = None
+        self.rate_config = None
+        self.total_updates = None
+        self.peak_rate = None
 
     def check_stop(self):
         if self.stop_reason:
@@ -100,6 +104,12 @@ class PointTrainer:
 
     def train_step(self, sample, epoch):
         start = time.perf_counter()
+        if self.peak_rate is not None:
+            rate = learning_rate_for_update(
+                self.peak_rate, self.steps, self.total_updates, self.rate_config
+            )
+            for group in self.optimizer.param_groups:
+                group["lr"] = rate
         self.optimizer.zero_grad(set_to_none=True)
         loss, metrics, _, _, _ = self.task(self.segmenter, sample)
         if not torch.isfinite(loss):
@@ -119,6 +129,7 @@ class PointTrainer:
                 "phase": "train",
                 "epoch": epoch,
                 "step": self.steps,
+                "learning_rate": self.optimizer.param_groups[0]["lr"],
                 **sample_record(sample),
                 "gradient_norm": float(norm),
                 "compute_step_seconds": time.perf_counter() - start,
@@ -326,6 +337,12 @@ class PointTrainer:
         train_loader_factory,
     ):
         start = time.perf_counter()
+        self.rate_config = config.get("lr_schedule")
+        self.peak_rate = config.get("learning_rate")
+        count = config.get("splits", {}).get("train", {}).get("instances")
+        if count is None:
+            count = len(train_data)
+        self.total_updates = count * config["epochs"]
         baseline = None
         if not self.resumed:
             baseline = self.evaluate(heldout_data, 0)

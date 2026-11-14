@@ -41,6 +41,30 @@ def add_fence_loss_comparisons(output, counts):
     return extra
 
 
+def add_learning_rate_comparisons(output, counts):
+    """Clone each constant-rate condition with a warmup/cosine schedule."""
+    extra = []
+    for label in CONDITIONS:
+        control = output / label
+        name = f"{label}-warmup-cosine"
+        root = output / name
+        root.mkdir()
+        config = json.loads((control / "config.json").read_text())
+        config.update(
+            lr_schedule={
+                "name": "warmup_cosine",
+                "warmup_fraction": 0.05,
+                "start_factor": 0.1,
+                "end_factor": 0.1,
+            },
+            comparison_control=str((control / "config.json").resolve()),
+        )
+        (root / "config.json").write_text(json.dumps(config, indent=2) + "\n")
+        shutil.copyfile(control / "excluded_targets.csv", root / "excluded_targets.csv")
+        extra.extend({**row, "condition": name} for row in counts if row["condition"] == label)
+    return extra
+
+
 def prepare(
     base_path,
     output,
@@ -48,10 +72,11 @@ def prepare(
     interval=5000,
     fence_loss_region="full",
     compare_fence_losses=False,
+    compare_learning_rates=False,
 ):
     if interval < 1 or fence_loss_region not in ("full", "visible"):
         raise ValueError("Positive interval and full/visible loss region required")
-    if compare_fence_losses and fence_loss_region != "full":
+    if (compare_fence_losses or compare_learning_rates) and fence_loss_region != "full":
         raise ValueError("Paired loss comparisons require full-loss control configs")
     if output.exists():
         raise FileExistsError("Choose a fresh preparation directory")
@@ -83,6 +108,7 @@ def prepare(
             checkpoint_interval_steps=1000,
             download_ahead=False,
             requested_training_fraction=fraction,
+            lr_schedule={"name": "constant"},
         )
         config["checkpoint_metric"] = (
             "mean_visible_iou" if config["loss_region"] == "visible" else "mean_full_iou"
@@ -117,6 +143,8 @@ def prepare(
         (root / "config.json").write_text(json.dumps(config, indent=2) + "\n")
     if compare_fence_losses:
         counts.extend(add_fence_loss_comparisons(output, counts))
+    if compare_learning_rates:
+        counts.extend(add_learning_rate_comparisons(output, counts))
     with (output / "sample_counts.csv").open("w", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=list(counts[0]))
         writer.writeheader()
@@ -137,6 +165,9 @@ if __name__ == "__main__":
         action="store_true",
         help="Prepare four original-loss conditions plus three matched visible-loss fences",
     )
+    parser.add_argument(
+        "--compare-learning-rates", action="store_true", help="Add four matched warmup/cosine runs"
+    )
     args = parser.parse_args()
     prepare(
         args.base_config,
@@ -145,4 +176,5 @@ if __name__ == "__main__":
         args.validation_interval_steps,
         args.fence_loss_region,
         args.compare_fence_losses,
+        args.compare_learning_rates,
     )
