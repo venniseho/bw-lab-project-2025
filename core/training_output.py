@@ -57,6 +57,16 @@ class TrainingOutput:
             self.tracking.log(metrics)
         if self.tracking and channel == "summary":
             prefix = "heldout_full" if record.get("validation_set") == "full" else "heldout"
+            additional = {
+                f"{prefix}/{key}": record[key]
+                for key in (
+                    "mean_full_iou",
+                    "mean_visible_iou",
+                    "mean_full_loss",
+                    "mean_visible_loss",
+                )
+                if key in record
+            }
             self.tracking.log(
                 {
                     f"{prefix}/mean_iou": record["mean_iou"],
@@ -64,6 +74,7 @@ class TrainingOutput:
                     f"{prefix}/instances": record["instances"],
                     f"{prefix}/epoch": record["epoch"],
                     f"{prefix}/step": record.get("step", 0),
+                    **additional,
                 }
             )
 

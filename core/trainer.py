@@ -205,6 +205,16 @@ class PointTrainer:
             "instances": len(rows),
             "mean_iou": float(np.mean([row["selected_iou"] for row in rows])),
             "mean_loss": float(np.mean([row["loss"] for row in rows])),
+            "mean_full_iou": float(
+                np.mean([row.get("full_iou", row["selected_iou"]) for row in rows])
+            ),
+            "mean_visible_iou": float(
+                np.mean([row.get("visible_iou", row["selected_iou"]) for row in rows])
+            ),
+            "mean_full_loss": float(np.mean([row.get("full_loss", row["loss"]) for row in rows])),
+            "mean_visible_loss": float(
+                np.mean([row.get("visible_loss", row["loss"]) for row in rows])
+            ),
         }
         self.output.record("summary", summary)
         self.last_summary = summary
@@ -214,13 +224,15 @@ class PointTrainer:
     def save_checkpoint(self, config, epoch):
         start = time.perf_counter()
         current_summary = self.last_summary if self.last_validation_step == self.steps else None
+        metric = config.get("checkpoint_metric", "mean_iou")
+        score = current_summary[metric] if current_summary else None
         improved = (
             current_summary is not None
             and current_summary["validation_set"] == "interval"
-            and current_summary["mean_iou"] > self.best_iou
+            and score > self.best_iou
         )
         if improved:
-            self.best_iou = current_summary["mean_iou"]
+            self.best_iou = score
             self.best_checkpoint = str(self.output.path / "checkpoint-best.pt")
         saved = checkpoint(
             self.segmenter.model,
@@ -252,6 +264,8 @@ class PointTrainer:
                 **saved,
                 "wall_seconds": time.perf_counter() - start,
                 "validation_mean_iou": current_summary["mean_iou"] if current_summary else None,
+                "selection_metric": metric,
+                "selection_score": score,
             },
         )
         self.latest_checkpoint = saved
@@ -367,6 +381,7 @@ class PointTrainer:
             "checkpoint": saved,
             "best_checkpoint": self.best_checkpoint,
             "best_interval_validation_iou": self.best_iou,
+            "best_checkpoint_metric": config.get("checkpoint_metric", "mean_iou"),
             "final_validation_summary": self.last_summary,
             "gradient_and_step_audit": self.audit,
             "wall_seconds": time.perf_counter() - start,

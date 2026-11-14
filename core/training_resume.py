@@ -61,6 +61,10 @@ def check_resume_config(saved, current):
         "training_order",
         "epochs",
         "native_revision",
+        "protocol_version",
+        "loss_region",
+        "drop_fully_hidden",
+        "checkpoint_metric",
     )
     if any(saved.get(key) != current.get(key) for key in keys):
         raise ValueError("Resume requires the same data, saved order, model and training settings")

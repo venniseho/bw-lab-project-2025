@@ -7,6 +7,11 @@ from core.stimuli.fragmentation import FragmentationConfig
 from core.stimuli.transforms import ContourFragmentation, FenceOcclusion
 
 
+def point_transform_seed(seed, image_id):
+    digest = hashlib.sha256(f"{seed}:{image_id}".encode()).digest()
+    return int.from_bytes(digest[:4], "little")
+
+
 @dataclass(frozen=True)
 class PointTransform:
     name: str
@@ -17,8 +22,7 @@ class PointTransform:
         if self.name == "identity":
             return sample
         image_id = sample["metadata"]["image_id"]
-        digest = hashlib.sha256(f"{self.seed}:{image_id}".encode()).digest()
-        seed = int.from_bytes(digest[:4], "little")
+        seed = point_transform_seed(self.seed, image_id)
         if self.name == "fragmentation":
             transform = ContourFragmentation(FragmentationConfig(**self.parameters), seed=seed)
         elif self.name == "fence":

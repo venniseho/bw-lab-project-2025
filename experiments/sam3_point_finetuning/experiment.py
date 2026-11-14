@@ -34,6 +34,14 @@ def validate_config(config, max_steps):
         raise ValueError("Positive epochs and nonnegative workers required")
     if config.get("checkpoint_interval_steps", 1000) < 1:
         raise ValueError("Checkpoint interval must be positive")
+    if config.get("loss_region", "full") not in ("full", "visible"):
+        raise ValueError("Loss region must be full or visible")
+    if config.get("checkpoint_metric", "mean_iou") not in (
+        "mean_iou",
+        "mean_full_iou",
+        "mean_visible_iou",
+    ):
+        raise ValueError("Unknown checkpoint IoU metric")
     if config["transform"] not in ("identity", "fence", "fragmentation"):
         raise ValueError("Unknown point-prompt transform")
     if config.get("resolution", 1008) != 1008:
@@ -179,7 +187,10 @@ def run(config, scope, output, wandb_mode="online", max_steps=None, resume=None)
         flush=True,
     )
     trainer = PointTrainer(
-        segmenter, optimizer, partial(forward_sample, seed=config["seed"]), output
+        segmenter,
+        optimizer,
+        partial(forward_sample, seed=config["seed"], loss_region=config.get("loss_region", "full")),
+        output,
     )
     exit_code = 1
     try:

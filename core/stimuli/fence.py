@@ -59,12 +59,8 @@ def generate_fence(
     This function does not change the inputs or global random state.
     """
     height, width = _validate_image(image_rgb)
-    bar_width, bar_spacing, bar_angle = _validate_parameters(
-        bar_width, bar_spacing, bar_angle, seed
-    )
     foreground = _foreground(gt_mask, height, width)
-    phase = _resolve_phase(phase, seed, bar_spacing)
-    occlusion = _rasterize_fence(height, width, bar_width, bar_spacing, bar_angle, phase)
+    occlusion = fence_mask(height, width, bar_width, bar_spacing, bar_angle, seed, phase=phase)
 
     corrupted = image_rgb.copy()
     corrupted[occlusion] = 0
@@ -75,6 +71,17 @@ def generate_fence(
         if area:
             object_fraction = float(np.count_nonzero(occlusion & foreground) / area)
     return FenceResult(corrupted, occlusion, image_fraction, object_fraction)
+
+
+def fence_mask(height, width, bar_width, bar_spacing, bar_angle=90.0, seed=None, *, phase=None):
+    """Rasterize the same occluder for annotation-only eligibility checks."""
+    if height <= 0 or width <= 0:
+        raise ValueError("Fence dimensions must be positive")
+    bar_width, bar_spacing, bar_angle = _validate_parameters(
+        bar_width, bar_spacing, bar_angle, seed
+    )
+    phase = _resolve_phase(phase, seed, bar_spacing)
+    return _rasterize_fence(height, width, bar_width, bar_spacing, bar_angle, phase)
 
 
 def _validate_image(image_rgb):

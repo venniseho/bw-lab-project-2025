@@ -1,5 +1,10 @@
 # Point-prompt SAM3 training and validation
 
+For seeded half-data experiments, validation every 5,000 updates, exclusion of
+fully hidden targets, and full/visible IoU and loss reporting, see the
+[follow-up protocol](../../docs/half_data_point_training.md). The original
+prepared configs retain their former image counts and validation interval.
+
 The active protocol is 1008x1008 preprocessing, batch size 1, one seeded random
 noncrowd target per source image, and one training epoch. Full point-path training
 updates the shared vision encoder, point encoder and mask decoder. The frozen
