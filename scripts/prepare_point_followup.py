@@ -6,6 +6,7 @@ import csv
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -20,9 +21,38 @@ CONDITIONS = {
 }
 
 
-def prepare(base_path, output, fraction=0.5, interval=5000, fence_loss_region="full"):
+def add_fence_loss_comparisons(output, counts):
+    """Reuse each control's exact cohort and order; change only its loss region."""
+    extra = []
+    for label in ("fence-low", "fence-medium", "fence-high"):
+        control = output / label
+        name = f"{label}-visible-loss"
+        root = output / name
+        root.mkdir()
+        config = json.loads((control / "config.json").read_text())
+        config.update(
+            loss_region="visible",
+            checkpoint_metric="mean_visible_iou",
+            comparison_control=str((control / "config.json").resolve()),
+        )
+        (root / "config.json").write_text(json.dumps(config, indent=2) + "\n")
+        shutil.copyfile(control / "excluded_targets.csv", root / "excluded_targets.csv")
+        extra.extend({**row, "condition": name} for row in counts if row["condition"] == label)
+    return extra
+
+
+def prepare(
+    base_path,
+    output,
+    fraction=0.5,
+    interval=5000,
+    fence_loss_region="full",
+    compare_fence_losses=False,
+):
     if interval < 1 or fence_loss_region not in ("full", "visible"):
         raise ValueError("Positive interval and full/visible loss region required")
+    if compare_fence_losses and fence_loss_region != "full":
+        raise ValueError("Paired loss comparisons require full-loss control configs")
     if output.exists():
         raise FileExistsError("Choose a fresh preparation directory")
     base = json.loads(base_path.read_text())
@@ -85,6 +115,8 @@ def prepare(base_path, output, fraction=0.5, interval=5000, fence_loss_region="f
                 counts.append(record)
                 print(json.dumps(record), flush=True)
         (root / "config.json").write_text(json.dumps(config, indent=2) + "\n")
+    if compare_fence_losses:
+        counts.extend(add_fence_loss_comparisons(output, counts))
     with (output / "sample_counts.csv").open("w", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=list(counts[0]))
         writer.writeheader()
@@ -100,6 +132,11 @@ if __name__ == "__main__":
     parser.add_argument("--train-fraction", type=float, default=0.5)
     parser.add_argument("--validation-interval-steps", type=int, default=5000)
     parser.add_argument("--fence-loss-region", choices=("full", "visible"), default="full")
+    parser.add_argument(
+        "--compare-fence-losses",
+        action="store_true",
+        help="Prepare four original-loss conditions plus three matched visible-loss fences",
+    )
     args = parser.parse_args()
     prepare(
         args.base_config,
@@ -107,4 +144,5 @@ if __name__ == "__main__":
         args.train_fraction,
         args.validation_interval_steps,
         args.fence_loss_region,
+        args.compare_fence_losses,
     )

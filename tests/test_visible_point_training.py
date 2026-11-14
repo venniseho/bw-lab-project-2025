@@ -21,7 +21,7 @@ from core.tasks.point_segmentation import candidate_ious, forward_sample, mask_l
 from core.trainer import PointTrainer
 from core.training_output import TrainingOutput
 from core.training_resume import check_resume_config
-from scripts.prepare_point_followup import prepare
+from scripts.prepare_point_followup import add_fence_loss_comparisons, prepare
 from tests.test_point_finetuning import tiny_model
 from tests.test_point_experiments import sample
 
@@ -54,6 +54,42 @@ def annotations(ids, tiny_id):
 
 
 class VisiblePointTests(unittest.TestCase):
+    def test_paired_loss_runs_reuse_identical_data_order_and_exclusions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            counts = []
+            for label in ("fence-low", "fence-medium", "fence-high"):
+                folder = root / label
+                folder.mkdir()
+                control = {
+                    "loss_region": "full",
+                    "checkpoint_metric": "mean_full_iou",
+                    "training_order": [3, 1, 2],
+                    "train_annotations": "same-train.json",
+                    "heldout_annotations": "same-val.json",
+                    "learning_rate": 1e-5,
+                }
+                (folder / "config.json").write_text(json.dumps(control))
+                (folder / "excluded_targets.csv").write_text(
+                    "split,image_id,annotation_id,reason\n"
+                )
+                counts.append({"condition": label, "selected_images": 3})
+            extra = add_fence_loss_comparisons(root, counts)
+            self.assertEqual(len(extra), 3)
+            for label in ("fence-low", "fence-medium", "fence-high"):
+                original = json.loads((root / label / "config.json").read_text())
+                comparison = json.loads((root / f"{label}-visible-loss/config.json").read_text())
+                comparison.pop("comparison_control")
+                self.assertEqual(comparison.pop("loss_region"), "visible")
+                self.assertEqual(comparison.pop("checkpoint_metric"), "mean_visible_iou")
+                original.pop("loss_region")
+                original.pop("checkpoint_metric")
+                self.assertEqual(original, comparison)
+                self.assertEqual(
+                    (root / label / "excluded_targets.csv").read_bytes(),
+                    (root / f"{label}-visible-loss/excluded_targets.csv").read_bytes(),
+                )
+
     def test_best_checkpoint_uses_the_explicit_visible_metric(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary)

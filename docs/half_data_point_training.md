@@ -116,3 +116,50 @@ done
 Each training job retains the standard one GPU, 12 CPUs, 64 GB CPU RAM, eight
 workers and online W&B logging. Preparation is a separate CPU-only job. Keep
 the original results; no existing job is cancelled or resubmitted by preparation.
+
+## Seven-run comparison: both fence objectives
+
+Use `both` as the preparation launcher's final argument to create four original
+loss conditions and three additional fence conditions with visible-region loss.
+Each fence pair shares the exact annotation paths, hashes, selected targets,
+training order and exclusions. Only the optimization loss region and best-model
+selection metric differ. Compare final checkpoints at the same update count to
+isolate the loss effect; best checkpoints use full IoU for the original objective
+and visible IoU for the visible objective, and are labelled accordingly.
+
+```bash
+cd /project/aip-sven/vho/bw-lab-project-2025
+git pull --ff-only origin main
+PLAN_ROOT=$(mktemp -d /scratch/vho/sam3-whole-scene/point-seven.XXXXXX)
+BASE_CONFIG=/scratch/vho/sam3-whole-scene/fragmentation-ahead.SQFHHT/prepared/config.json
+PREP_ID=$(sbatch --parsable --output="$PLAN_ROOT/preparation-%j.out" \
+  scripts/vulcan_point_followup.sbatch "$PWD" "$BASE_CONFIG" \
+  "$PLAN_ROOT/prepared" both)
+echo "Preparation job: $PREP_ID"
+echo "Keep this path: $PLAN_ROOT"
+```
+
+After preparation completes successfully:
+
+```bash
+cat "$PLAN_ROOT/prepared/sample_counts.csv"
+export WANDB_ENTITY=venniseho14-university-of-toronto
+export WANDB_PROJECT=SAM-finetuning
+export WANDB_MODE=online
+for CONDITION in fragmentation fence-low fence-medium fence-high \
+  fence-low-visible-loss fence-medium-visible-loss fence-high-visible-loss; do
+  JOB=$(sbatch --parsable --time=24:00:00 \
+    --job-name="bwlab-half-$CONDITION" \
+    --output="$PLAN_ROOT/$CONDITION-%j.out" \
+    scripts/vulcan_point_training.sbatch "$PWD" \
+    "$PLAN_ROOT/prepared/$CONDITION/config.json" mask_decoder_only \
+    "$PLAN_ROOT/training-$CONDITION")
+  echo "$CONDITION: job=$JOB results=$PLAN_ROOT/training-$CONDITION"
+done
+```
+
+Later fence-to-fragmentation and fragmentation-to-fence evaluations reuse saved
+model checkpoints; they do not require another training epoch. They should use
+matched eligible targets when paired comparisons are intended. A clean-image
+training control and learning-rate warmup/cosine comparisons remain separate
+experiments; neither is added by this seven-run preparation.
