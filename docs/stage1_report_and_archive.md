@@ -14,7 +14,7 @@ source /scratch/vho/sam3-whole-scene/train-env/bin/activate
 PLAN_ROOT=/scratch/vho/sam3-whole-scene/point-staged.dUreDG
 
 python scripts/report_point_staged.py \
-  --plan-root "$PLAN_ROOT" --output-dir "$PLAN_ROOT/report-stage1"
+  --plan-root "$PLAN_ROOT" --output-dir "$PLAN_ROOT/decoder-only-half-data-lr-comparison"
 ```
 
 Choose a fresh output directory if the report already exists. The outputs are:
@@ -39,7 +39,9 @@ performance estimates. Best models were selected on the same validation set.
 ## Archive completed runs without copying active Stage 2 outputs
 
 The following copies prepared annotations/configs, all outputs from the eight
-completed Stage 1 runs, their Slurm logs, and `report-stage1` if present:
+completed Stage 1 runs, their Slurm logs, and
+`decoder-only-half-data-lr-comparison` if present. Reports still named
+`report-stage1` are also accepted and archived under the new name:
 
 ```bash
 bash scripts/archive_point_stage1.sh \
@@ -55,13 +57,20 @@ available for the upcoming evaluations and rebase paths if restoring elsewhere.
 
 ## Download the report to the laptop
 
+For an existing report on Vulcan that still has the old name, rename it there
+first (renaming local copies does not change Vulcan):
+
+```bash
+mv "$PLAN_ROOT/report-stage1" "$PLAN_ROOT/decoder-only-half-data-lr-comparison"
+```
+
 From the laptop's WSL terminal:
 
 ```bash
 mkdir -p /mnt/c/Users/venni/Downloads/bwlab-results
-scp -r vulcan:/scratch/vho/sam3-whole-scene/point-staged.dUreDG/report-stage1 \
+scp -r vulcan:/scratch/vho/sam3-whole-scene/point-staged.dUreDG/decoder-only-half-data-lr-comparison \
   /mnt/c/Users/venni/Downloads/bwlab-results/
-explorer.exe 'C:\Users\venni\Downloads\bwlab-results\report-stage1'
+explorer.exe 'C:\Users\venni\Downloads\bwlab-results\decoder-only-half-data-lr-comparison'
 ```
 
 Open `index.html`; its image paths remain relative so the copied report works

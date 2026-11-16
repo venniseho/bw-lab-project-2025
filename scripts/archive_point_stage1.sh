@@ -29,7 +29,11 @@ for condition in "${conditions[@]}"; do
     if [[ -f "$logfile" ]]; then rsync -a "$logfile" "$archive/"; fi
   done
 done
-if [[ -d "$root/report-stage1" ]]; then
-  rsync -a --info=progress2 "$root/report-stage1/" "$archive/report-stage1/"
+report_name=decoder-only-half-data-lr-comparison
+if [[ -d "$root/$report_name" ]]; then
+  rsync -a --info=progress2 "$root/$report_name/" "$archive/$report_name/"
+elif [[ -d "$root/report-stage1" ]]; then
+  # Accept reports generated before the descriptive folder name was introduced.
+  rsync -a --info=progress2 "$root/report-stage1/" "$archive/$report_name/"
 fi
 echo "Archive finished: $archive"
