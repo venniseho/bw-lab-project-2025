@@ -37,6 +37,13 @@ def read_curve(run):
         for row in rows
     ]
     result.sort(key=lambda row: row["step"])
+    for parsed, source in zip(result, sorted(rows, key=lambda row: int(row["step"]))):
+        for key in ("mean_full_iou", "mean_visible_iou", "mean_full_loss", "mean_visible_loss"):
+            if source.get(key):
+                value = float(source[key])
+                if not math.isfinite(value) or value < 0 or (key.endswith("iou") and value > 1):
+                    raise ValueError(f"Invalid {key}: {run}")
+                parsed[key] = value
     if not result or result[0]["step"] != 0:
         raise ValueError(f"Missing before-training baseline: {run}")
     if len({row["step"] for row in result}) != len(result):
