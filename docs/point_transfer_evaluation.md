@@ -84,3 +84,39 @@ alias; no loss is backpropagated. Full and visible IoU are identical for the
 current fragmentation transform. Report differences against each paired
 pretrained baseline, rather than comparing raw means across different cohorts.
 Clean-image evaluation/training controls remain a separate experiment.
+
+## Generate charts after all seven jobs finish
+
+This reads CSV/JSON and saved previews on the CPU; no GPU allocation or new
+inference is needed. It requires every expected completion marker and checks
+target/prompt pairing and agreement between per-image and aggregate IoUs.
+
+```bash
+cd /project/aip-sven/vho/bw-lab-project-2025
+git pull --ff-only origin main
+module load python/3.12.4
+source /scratch/vho/sam3-whole-scene/train-env/bin/activate
+
+# Or set CROSS_ROOT to the exact path printed when you submitted the jobs.
+CROSS_ROOT=$(ls -td /scratch/vho/sam3-whole-scene/cross-condition.* | head -n 1)
+echo "Reading: $CROSS_ROOT"
+REPORT_ROOT="$CROSS_ROOT/cross-condition-results"
+
+python scripts/report_point_transfer.py \
+  --cross-root "$CROSS_ROOT" --output-dir "$REPORT_ROOT"
+echo "Report: $REPORT_ROOT/index.html"
+```
+
+The report includes PNG/SVG charts of mean IoUs and their changes, plus paired
+scatterplots for both metrics. Scatter x = original pretrained model IoU,
+y = fine-tuned model IoU, not clean-versus-occluded IoU. Above diagonal means
+improvement after fine-tuning on the source condition. (0,0) means no overlap
+with the labelled target from either model; overlapping points are counted in
+each panel. The dots are darker and have no coordinate jitter.
+
+`run_summary.csv` includes before/after means, deltas and counts of improved,
+equal and worse targets. `paired_image_results.csv` contains each target's IoUs
+and changes. `timing.csv` combines recorded validation timings. `index.html`
+also displays the copied before/after contact sheets. Download this report folder
+with `scp -r` to view it locally; its links are relative. Choose a fresh output
+directory to generate a second report without overwriting the first.
