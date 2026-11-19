@@ -16,6 +16,7 @@
   - Fence-trained decoders → fragmentation: full IoU **0.061–0.082**, versus **0.144** pretrained; visible-loss training also failed to improve transfer over the pretrained model.
   - These results suggest specialization to the training transformation. The near-zero fence predictions need visual inspection and own-condition checkpoint replay before attributing a mechanism. [Paired charts, tables and 36 contact sheets](../experiments/decoder-crosscondition-half/index.html)
 - Downloaded Stage 2 summaries, timings, metadata and previews to the laptop. Checkpoints remain on Vulcan. [Low](../experiments/decoder-visible-loss/training-fence-low-visible-loss/summary.csv), [medium](../experiments/decoder-visible-loss/training-fence-medium-visible-loss/summary.csv), [high](../experiments/decoder-visible-loss/training-fence-high-visible-loss/summary.csv) fence logs are the evidence for the loss comparison above.
+- Generated [matched full-loss versus visible-loss graphs and examples](../experiments/decoder-visible-loss/report/index.html): both IoU learning curves, both loss curves, final-score comparisons and 24 saved contact sheets, in PNG/SVG with CSV data.
 
 ## Protocol and runtime
 
@@ -29,7 +30,7 @@
 ## Next steps
 
 - Inspect transfer failures and replay final checkpoints on their own-condition validation sets to confirm saved final metrics.
-- Plot the newly downloaded full-loss versus visible-loss learning curves and review matched before/after examples.
+- Review the generated full-loss versus visible-loss learning curves and matched before/after examples.
 - Evaluate clean images to check retained ability; a clean-trained control remains outstanding.
 - Archive Stage 2 checkpoints and transfer results to project storage; local reports and W&B do not archive model weights.
 - If comparing full point-path versus decoder-only training directly, match the data budget and eligibility rules: the earlier full-path runs used twice as many training images.
