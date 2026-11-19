@@ -1,4 +1,8 @@
-# Supervisor update draft
+# Supervisor updates
+
+Current: [Weekly update — 19 November 2026](weekly_update_2026-11-19.md).
+
+## Historical pipeline smoke-test draft
 
 I have a working end-to-end pipeline for testing SAM3 on fragmented and
 occluded inputs. It follows the organization of your mlvbench code: reusable
