@@ -88,8 +88,35 @@ def log_evaluation(output, name, summary, phase):
         )
 
 
+def verify_replay(source, complete, targets, summaries):
+    if len(targets) != 1:
+        raise ValueError("Replay must use exactly one original validation condition")
+    name, target = next(iter(targets.items()))
+    for key in (
+        "transform",
+        "transform_parameters",
+        "heldout_annotations",
+        "validation_image_count",
+    ):
+        if source.get(key) != target.get(key):
+            raise ValueError(f"Replay condition differs in {key}")
+    original = complete["final_validation_summary"]
+    replay = summaries[name]["finetuned"]
+    if replay["instances"] != original["instances"]:
+        raise ValueError("Replay validation count changed")
+    delta = abs(replay["mean_full_iou"] - original.get("mean_full_iou", original["mean_iou"]))
+    if delta > 0.005:
+        raise RuntimeError(
+            f"Own-condition replay IoU differs by {delta:.6f}; inspect before new experiments"
+        )
+    print(
+        f"Own-condition replay passed: aggregate full-IoU delta={delta:.6f} (limit 0.005)",
+        flush=True,
+    )
+
+
 @torch.no_grad()
-def run(source_run, target_paths, destination, wandb_mode):
+def run(source_run, target_paths, destination, wandb_mode, require_source_replay=False):
     started = time.perf_counter()
     metadata, complete, checkpoint = completed_source(source_run)
     source = metadata["config"]
@@ -167,6 +194,8 @@ def run(source_run, target_paths, destination, wandb_mode):
                     output.tracking.log(
                         {f"cross_examples/{name}/{index}": output.image_factory(str(image))}
                     )
+        if require_source_replay:
+            verify_replay(source, complete, targets, summaries)
         output.save_json(
             "complete",
             {
@@ -187,13 +216,20 @@ def main():
     parser.add_argument("--source-run", type=Path, required=True)
     parser.add_argument("--target-config", type=Path, nargs="+", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--require-source-replay", action="store_true")
     parser.add_argument(
         "--wandb-mode",
         choices=("online", "offline", "disabled"),
         default=os.environ.get("WANDB_MODE", "online"),
     )
     args = parser.parse_args()
-    run(args.source_run, args.target_config, args.output, args.wandb_mode)
+    run(
+        args.source_run,
+        args.target_config,
+        args.output,
+        args.wandb_mode,
+        args.require_source_replay,
+    )
 
 
 if __name__ == "__main__":

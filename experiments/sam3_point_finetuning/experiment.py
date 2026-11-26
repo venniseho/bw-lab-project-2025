@@ -20,6 +20,7 @@ from core.tasks.point_segmentation import forward_sample
 from core.trainer import PointTrainer
 from core.training_output import TrainingOutput
 from core.stimuli.point_transforms import PointTransform
+from core.stimuli.point_mixture import PointMixture
 from core.data_loading.download_ahead import DownloadReadyDataset
 from core.training_resume import shutdown_signals
 from core.learning_rate import learning_rate_for_update
@@ -38,6 +39,11 @@ def validate_config(config, max_steps):
     if config.get("loss_region", "full") not in ("full", "visible"):
         raise ValueError("Loss region must be full or visible")
     total_updates = config["epochs"] * config["splits"]["train"]["instances"]
+    accumulation = config.get("accumulation_steps", 1)
+    if not isinstance(accumulation, int) or isinstance(accumulation, bool) or accumulation < 1:
+        raise ValueError("Accumulation steps must be a positive integer")
+    if config.get("train_mixture") and config.get("download_ahead"):
+        raise ValueError("Mixtures require already-cached training images")
     learning_rate_for_update(config["learning_rate"], 0, total_updates, config.get("lr_schedule"))
     if config.get("checkpoint_metric", "mean_iou") not in (
         "mean_iou",
@@ -75,6 +81,12 @@ def build_data(config):
     )
     options = {"transform": transform, "one_per_image": True, "seed": config["seed"]}
     train = dataset(config["train_annotations"], **options)
+    if config.get("train_mixture"):
+        train.transform = PointMixture(
+            config["train_mixture"],
+            [record["image_id"] for record in train.records],
+            config["seed"],
+        )
     heldout = dataset(
         config["heldout_annotations"], image_count=config.get("validation_image_count"), **options
     )
@@ -167,6 +179,9 @@ def run(config, scope, output, wandb_mode="online", max_steps=None, resume=None)
         "max_steps": max_steps,
         "resumed_from": str(resume) if resume else None,
         "point_policy": "uniform_foreground_fixed_per_instance",
+        "step_unit": "image_presentations",
+        "accumulation_steps": config.get("accumulation_steps", 1),
+        "training_condition_counts": getattr(getattr(train, "transform", None), "counts", None),
         "dataset_counts": {
             name: {
                 "unique_images": len({record["image_id"] for record in data.records}),

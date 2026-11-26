@@ -75,6 +75,9 @@ class PointTrainer:
         self.rate_config = None
         self.total_updates = None
         self.peak_rate = None
+        self.accumulation_steps = 1
+        self.accumulated_images = 0
+        self.optimizer_updates = 0
 
     def check_stop(self):
         if self.stop_reason:
@@ -93,6 +96,15 @@ class PointTrainer:
         self.segmenter.model.load_state_dict(saved["model"])
         self.optimizer.load_state_dict(saved["optimizer"])
         self.steps = saved["step"]
+        self.accumulation_steps = config.get("accumulation_steps", 1)
+        self.accumulated_images = state.get("accumulated_images", 0)
+        self.optimizer_updates = state.get("optimizer_updates", self.steps)
+        gradients = state.get("pending_gradients", {})
+        parameters = dict(self.segmenter.model.named_parameters())
+        for name, gradient in gradients.items():
+            parameters[name].grad = gradient.to(parameters[name].device)
+        if self.accumulated_images and not gradients:
+            raise ValueError("Accumulation checkpoint lacks pending gradients")
         self.epoch, self.epoch_step = state["epoch"], state["epoch_step"]
         self.audit = state["audit"]
         self.best_iou = state["best_iou"]
@@ -102,36 +114,55 @@ class PointTrainer:
         restore_random_state(state["random"])
         self.resumed = True
 
-    def train_step(self, sample, epoch):
+    def optimizer_step(self):
+        """Average the actual window, including a short final window, then clip."""
+        for parameter in self.parameters:
+            if parameter.grad is not None:
+                parameter.grad.div_(self.accumulated_images)
+        probes = self.segmenter.gradient_probes() if self.optimizer_updates == 0 else None
+        norm = torch.nn.utils.clip_grad_norm_(self.parameters, 1.0, error_if_nonfinite=True)
+        self.optimizer.step()
+        self.optimizer_updates += 1
+        self.accumulated_images = 0
+        if probes is not None:
+            self.audit = self.segmenter.check_update(probes)
+            self.output.save_json("audit", self.audit)
+        return float(norm)
+
+    def train_step(self, sample, epoch, flush=False):
         start = time.perf_counter()
-        if self.peak_rate is not None:
+        if self.accumulated_images == 0:
+            self.optimizer.zero_grad(set_to_none=True)
+        if self.peak_rate is not None and self.accumulated_images == 0:
             rate = learning_rate_for_update(
-                self.peak_rate, self.steps, self.total_updates, self.rate_config
+                self.peak_rate, self.optimizer_updates, self.total_updates, self.rate_config
             )
             for group in self.optimizer.param_groups:
                 group["lr"] = rate
-        self.optimizer.zero_grad(set_to_none=True)
         loss, metrics, _, _, _ = self.task(self.segmenter, sample)
         if not torch.isfinite(loss):
             raise RuntimeError("Non-finite loss")
         loss.backward()
-        probes = self.segmenter.gradient_probes() if self.steps == 0 else None
-        norm = torch.nn.utils.clip_grad_norm_(self.parameters, 1.0, error_if_nonfinite=True)
-        self.optimizer.step()
+        self.accumulated_images += 1
+        window_images = self.accumulated_images
+        updated = window_images == self.accumulation_steps or flush
+        norm = self.optimizer_step() if updated else None
         self.steps += 1
         self.epoch_step += 1
-        if probes is not None:
-            self.audit = self.segmenter.check_update(probes)
-            self.output.save_json("audit", self.audit)
         self.output.record(
             "train",
             {
                 "phase": "train",
                 "epoch": epoch,
                 "step": self.steps,
+                "step_unit": "image_presentations",
+                "optimizer_updates": self.optimizer_updates,
+                "optimizer_updated": updated,
+                "accumulation_steps": self.accumulation_steps,
+                "window_images": window_images,
                 "learning_rate": self.optimizer.param_groups[0]["lr"],
                 **sample_record(sample),
-                "gradient_norm": float(norm),
+                "gradient_norm": norm,
                 "compute_step_seconds": time.perf_counter() - start,
                 **metrics,
             },
@@ -143,9 +174,11 @@ class PointTrainer:
         self.segmenter.train(True)
         timing = PhaseTiming(self.segmenter.model, "train", epoch)
         try:
-            for sample in samples:
+            for index, sample in enumerate(samples):
                 self.check_stop()
-                self.train_step(sample, epoch)
+                final_image = index + 1 == len(samples)
+                limit_reached = max_steps is not None and self.steps + 1 >= max_steps
+                self.train_step(sample, epoch, flush=final_image or limit_reached)
                 timing.observe(sample)
                 self.check_stop()
                 if after_step is not None and self.steps % validation_interval == 0:
@@ -213,6 +246,7 @@ class PointTrainer:
             "epoch": epoch,
             "step": self.steps,
             "validation_set": validation_set,
+            "optimizer_updates": self.optimizer_updates,
             "instances": len(rows),
             "mean_iou": float(np.mean([row["selected_iou"] for row in rows])),
             "mean_loss": float(np.mean([row["loss"] for row in rows])),
@@ -257,6 +291,13 @@ class PointTrainer:
                 "version": 1,
                 "epoch": self.epoch,
                 "epoch_step": self.epoch_step,
+                "accumulated_images": self.accumulated_images,
+                "optimizer_updates": self.optimizer_updates,
+                "pending_gradients": {
+                    name: parameter.grad.detach().cpu().clone()
+                    for name, parameter in self.segmenter.model.named_parameters()
+                    if self.accumulated_images and parameter.grad is not None
+                },
                 "random": random_state(),
                 "audit": self.audit,
                 "best_iou": self.best_iou,
@@ -342,7 +383,10 @@ class PointTrainer:
         count = config.get("splits", {}).get("train", {}).get("instances")
         if count is None:
             count = len(train_data)
-        self.total_updates = count * config["epochs"]
+        self.accumulation_steps = config.get("accumulation_steps", 1)
+        if self.accumulation_steps < 1:
+            raise ValueError("Accumulation steps must be positive")
+        self.total_updates = math.ceil(count / self.accumulation_steps) * config["epochs"]
         baseline = None
         if not self.resumed:
             baseline = self.evaluate(heldout_data, 0)
@@ -395,6 +439,9 @@ class PointTrainer:
             )
         summary = {
             "steps": self.steps,
+            "step_unit": "image_presentations",
+            "optimizer_updates": self.optimizer_updates,
+            "accumulation_steps": self.accumulation_steps,
             "checkpoint": saved,
             "best_checkpoint": self.best_checkpoint,
             "best_interval_validation_iou": self.best_iou,

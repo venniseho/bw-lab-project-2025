@@ -66,6 +66,9 @@ def check_resume_config(saved, current):
         "loss_region",
         "drop_fully_hidden",
         "checkpoint_metric",
+        "train_mixture",
     )
     if any(saved.get(key) != current.get(key) for key in keys):
         raise ValueError("Resume requires the same data, saved order, model and training settings")
+    if saved.get("accumulation_steps", 1) != current.get("accumulation_steps", 1):
+        raise ValueError("Resume requires the same accumulation window")
